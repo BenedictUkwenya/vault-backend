@@ -99,6 +99,21 @@ async function redeem(req, res) {
     }
   }
 
+  // Return existing pending (unscanned) redemption instead of creating a duplicate
+  const { data: existing } = await supabase
+    .from('redemptions')
+    .select()
+    .eq('user_id', userId)
+    .eq('deal_id', dealId)
+    .is('verified_at', null)
+    .order('redeemed_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existing) {
+    return res.json({ redemption: existing, qr_data: existing.id });
+  }
+
   const { data: redemption, error: redeemErr } = await supabase
     .from('redemptions')
     .insert({
