@@ -24,7 +24,27 @@ async function scanMember(req, res) {
   const isValid =
     profile.membership_tier === 'paid'
       ? !profile.membership_expires_at || new Date(profile.membership_expires_at) > new Date()
-      : true; // free members are always valid
+      : true;
+
+  // Look up the scanning business name for the notification
+  const { data: business } = await supabase
+    .from('businesses')
+    .select('name')
+    .eq('owner_id', req.user.id)
+    .single();
+
+  const businessName = business?.name || 'a business';
+
+  // Notify the scanned member their card was checked
+  try {
+    await supabase.from('notifications').insert({
+      user_id: profile.id,
+      title: 'Membership Card Scanned 🔍',
+      body: `Your Vault membership card was scanned at ${businessName}.`,
+      type: 'system',
+      data: { scanned_by_business: businessName },
+    });
+  } catch (_) {}
 
   res.json({
     id: profile.id,

@@ -1,6 +1,21 @@
 const supabase = require('../config/supabase');
 const { validationResult } = require('express-validator');
 
+// ── Notification helper ───────────────────────────────────────────────────────
+async function _notify(userId, title, body, type = 'booking', data = {}) {
+  try {
+    await supabase.from('notifications').insert({
+      user_id: userId,
+      title,
+      body,
+      type,
+      data,
+    });
+  } catch (_) {
+    // Non-fatal — don't block the main response
+  }
+}
+
 async function listForUser(req, res) {
   const { data, error } = await supabase
     .from('bookings_with_details')
@@ -77,6 +92,33 @@ async function create(req, res) {
     .single();
 
   if (error) return res.status(400).json({ error: error.message });
+
+  // Notify the member their booking is received
+  await _notify(
+    req.user.id,
+    'Booking Requested 📅',
+    `Your booking request has been received and is pending approval.`,
+    'booking',
+    { booking_id: data.id }
+  );
+
+  // Notify the business owner a new booking came in
+  const { data: bizOwner } = await supabase
+    .from('businesses')
+    .select('owner_id, name')
+    .eq('id', business_id)
+    .single();
+
+  if (bizOwner) {
+    await _notify(
+      bizOwner.owner_id,
+      'New Booking Request 🔔',
+      `${req.user.full_name || 'A member'} requested a booking for "${service_requested}".`,
+      'booking',
+      { booking_id: data.id }
+    );
+  }
+
   res.status(201).json(data);
 }
 
@@ -129,6 +171,16 @@ async function approve(req, res) {
     .single();
 
   if (error) return res.status(400).json({ error: error.message });
+
+  // Notify the member
+  await _notify(
+    data.user_id,
+    'Booking Approved ✅',
+    `Your booking for "${data.service_requested}" has been approved!${data.response_note ? ' Note: ' + data.response_note : ''}`,
+    'booking',
+    { booking_id: data.id }
+  );
+
   res.json(data);
 }
 
@@ -148,6 +200,16 @@ async function deny(req, res) {
     .single();
 
   if (error) return res.status(400).json({ error: error.message });
+
+  // Notify the member
+  await _notify(
+    data.user_id,
+    'Booking Not Approved',
+    `Your booking for "${data.service_requested}" was not approved.${data.response_note ? ' Reason: ' + data.response_note : ''}`,
+    'booking',
+    { booking_id: data.id }
+  );
+
   res.json(data);
 }
 

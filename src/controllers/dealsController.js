@@ -228,6 +228,17 @@ async function verifyRedemption(req, res) {
 
   if (error || !redemption) return res.status(404).json({ error: 'Redemption not found' });
 
+  // Notify the member their deal redemption was verified
+  try {
+    await supabase.from('notifications').insert({
+      user_id: redemption.user_id,
+      title: 'Deal Redeemed Successfully ✅',
+      body: `Your "${redemption.deals?.title}" deal was verified and redeemed.`,
+      type: 'deal',
+      data: { deal_id: redemption.deal_id },
+    });
+  } catch (_) {}
+
   res.json({
     type: 'redemption',
     is_valid: true,
