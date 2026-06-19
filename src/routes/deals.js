@@ -1,6 +1,6 @@
 const router = require('express').Router();
 const { body } = require('express-validator');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, requireBusiness } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
 const dealsController = require('../controllers/dealsController');
 
@@ -22,6 +22,7 @@ router.post('/verify-redemption', authenticate, asyncHandler(dealsController.ver
 router.post(
   '/',
   authenticate,
+  requireBusiness,
   [
     body('title').trim().notEmpty(),
     body('discount_percentage').isInt({ min: 25 }),
@@ -31,8 +32,9 @@ router.post(
 router.patch(
   '/:id',
   authenticate,
+  requireBusiness,
   asyncHandler(dealsController.update)
 );
-router.delete('/:id', authenticate, asyncHandler(dealsController.remove));
+router.delete('/:id', authenticate, requireBusiness, asyncHandler(dealsController.remove));
 
 module.exports = router;

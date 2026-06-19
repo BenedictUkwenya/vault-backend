@@ -1,6 +1,6 @@
 const router = require('express').Router();
 const { body, query } = require('express-validator');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, requireBusiness } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
 const businessesController = require('../controllers/businessesController');
 
@@ -11,7 +11,7 @@ router.get('/trending', asyncHandler(businessesController.trending));
 router.get('/:id', asyncHandler(businessesController.getById));
 
 // Authenticated business routes
-router.post('/scan-member', authenticate, asyncHandler(businessesController.scanMember));
+router.post('/scan-member', authenticate, requireBusiness, asyncHandler(businessesController.scanMember));
 
 // Auth required
 router.post(
@@ -24,9 +24,9 @@ router.post(
   ],
   asyncHandler(businessesController.register)
 );
-router.patch('/my', authenticate, asyncHandler(businessesController.updateMy));
-router.get('/my/profile', authenticate, asyncHandler(businessesController.getMy));
-router.get('/my/analytics', authenticate, asyncHandler(businessesController.getAnalytics));
+router.patch('/my', authenticate, requireBusiness, asyncHandler(businessesController.updateMy));
+router.get('/my/profile', authenticate, requireBusiness, asyncHandler(businessesController.getMy));
+router.get('/my/analytics', authenticate, requireBusiness, asyncHandler(businessesController.getAnalytics));
 
 // Voting
 router.post('/:id/vote', authenticate, asyncHandler(businessesController.vote));

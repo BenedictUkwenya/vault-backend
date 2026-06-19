@@ -18,6 +18,7 @@ const referralRoutes = require('./routes/referrals');
 const notificationRoutes = require('./routes/notifications');
 const adminRoutes = require('./routes/admin');
 const paymentRoutes = require('./routes/payments');
+const ambassadorRoutes = require('./routes/ambassadors');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -68,6 +69,7 @@ app.use('/api/referrals', referralRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/ambassadors', ambassadorRoutes);
 
 // ── 404 ───────────────────────────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));

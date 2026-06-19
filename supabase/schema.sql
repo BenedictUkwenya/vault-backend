@@ -41,7 +41,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- ============================================================
 -- ENUMS
 -- ============================================================
-CREATE TYPE user_role AS ENUM ('user', 'business', 'admin');
+CREATE TYPE user_role AS ENUM ('user', 'business', 'ambassador', 'admin', 'super_admin');
 CREATE TYPE membership_tier AS ENUM ('free', 'paid');
 CREATE TYPE deal_type AS ENUM ('general', 'food', 'retail', 'entertainment', 'wellness', 'travel', 'service');
 CREATE TYPE redemption_method AS ENUM ('qr', 'code', 'show_card');
