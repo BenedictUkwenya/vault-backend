@@ -1,4 +1,5 @@
 const supabase = require('../config/supabase');
+const { ensureBusinessRole } = require('../utils/ensureBusinessRole');
 
 async function listCategories(req, res) {
   const { data, error } = await supabase
@@ -82,6 +83,7 @@ async function trending(req, res) {
     .from('businesses_with_stats')
     .select('*')
     .eq('is_approved', true)
+    .order('is_featured', { ascending: false })
     .order('view_count', { ascending: false })
     .limit(10);
 
@@ -136,11 +138,7 @@ async function register(req, res) {
 
   if (error) return res.status(400).json({ error: error.message });
 
-  // Update user role to business
-  await supabase
-    .from('profiles')
-    .update({ role: 'business' })
-    .eq('id', req.user.id);
+  await ensureBusinessRole(req.user.id);
 
   res.status(201).json(data);
 }
@@ -153,6 +151,9 @@ async function getMy(req, res) {
     .single();
 
   if (error || !data) return res.status(404).json({ error: 'Business not found' });
+
+  await ensureBusinessRole(req.user.id);
+
   res.json(data);
 }
 
@@ -177,7 +178,7 @@ async function updateMy(req, res) {
 async function getAnalytics(req, res) {
   const { data: business } = await supabase
     .from('businesses')
-    .select('id, rating_avg, total_reviews')
+    .select('id, rating_avg')
     .eq('owner_id', req.user.id)
     .single();
 
@@ -188,17 +189,15 @@ async function getAnalytics(req, res) {
 
   const [redemptions7d, redemptions30d, bookings30d, views] = await Promise.all([
     supabase
-      .from('bookings')
-      .select('created_at')
+      .from('redemptions')
+      .select('redeemed_at')
       .eq('business_id', business.id)
-      .eq('status', 'approved')
-      .gte('created_at', sevenDaysAgo),
+      .gte('redeemed_at', sevenDaysAgo),
     supabase
-      .from('bookings')
-      .select('created_at')
+      .from('redemptions')
+      .select('redeemed_at')
       .eq('business_id', business.id)
-      .eq('status', 'approved')
-      .gte('created_at', thirtyDaysAgo),
+      .gte('redeemed_at', thirtyDaysAgo),
     supabase
       .from('bookings')
       .select('created_at, status')
@@ -215,7 +214,7 @@ async function getAnalytics(req, res) {
   const dailyCounts = Array(7).fill(0);
   const now = new Date();
   for (const row of (redemptions7d.data || [])) {
-    const daysAgo = Math.floor((now - new Date(row.created_at)) / (24 * 60 * 60 * 1000));
+    const daysAgo = Math.floor((now - new Date(row.redeemed_at)) / (24 * 60 * 60 * 1000));
     const idx = 6 - daysAgo;
     if (idx >= 0 && idx < 7) dailyCounts[idx]++;
   }
@@ -225,7 +224,6 @@ async function getAnalytics(req, res) {
     bookings_30d: bookings30d.data?.length || 0,
     total_views: views.data?.total_views || 0,
     rating: business.rating_avg || 0,
-    total_reviews: business.total_reviews || 0,
     redemptions_7d: dailyCounts,
   });
 }
@@ -274,5 +272,18 @@ async function voteResults(req, res) {
   res.json(results);
 }
 
+async function myVote(req, res) {
+  const start = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+  const { data } = await supabase
+    .from('business_votes')
+    .select('business_id, created_at, businesses(name, logo_url)')
+    .eq('user_id', req.user.id)
+    .gte('created_at', start)
+    .maybeSingle();
+
+  res.json({ voted: !!data, vote: data || null });
+}
+
 module.exports = {
-  listCategories, scanMember, list, trending, getById, register, getMy, updateMy, getAnalytics, vote, voteResults };
+  listCategories, scanMember, list, trending, getById, register, getMy, updateMy, getAnalytics, vote, voteResults, myVote,
+};

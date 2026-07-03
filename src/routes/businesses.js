@@ -31,5 +31,6 @@ router.get('/my/analytics', authenticate, requireBusiness, asyncHandler(business
 // Voting
 router.post('/:id/vote', authenticate, asyncHandler(businessesController.vote));
 router.get('/votes/results', asyncHandler(businessesController.voteResults));
+router.get('/votes/me', authenticate, asyncHandler(businessesController.myVote));
 
 module.exports = router;

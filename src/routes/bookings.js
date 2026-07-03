@@ -21,5 +21,6 @@ router.post(
 router.post('/:id/cancel', authenticate, asyncHandler(bookingsController.cancel));
 router.post('/:id/approve', authenticate, asyncHandler(bookingsController.approve));
 router.post('/:id/deny', authenticate, asyncHandler(bookingsController.deny));
+router.post('/:id/complete', authenticate, asyncHandler(bookingsController.complete));
 
 module.exports = router;

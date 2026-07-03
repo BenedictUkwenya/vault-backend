@@ -33,6 +33,7 @@ router.post(
 
 router.post(
   '/reset-password',
+  authenticate,
   [body('password').isLength({ min: 8 })],
   asyncHandler(authController.resetPassword)
 );

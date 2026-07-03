@@ -1,4 +1,5 @@
 const supabase = require('../config/supabase');
+const { ensureBusinessRole } = require('../utils/ensureBusinessRole');
 
 async function stats(req, res) {
   const [users, businesses, deals, activeSubscriptions] = await Promise.all([
@@ -81,10 +82,11 @@ async function approveBusiness(req, res) {
     .single();
 
   if (error) return res.status(400).json({ error: error.message });
+
+  if (data?.owner_id) await ensureBusinessRole(data.owner_id);
+
   res.json(data);
 }
-
-async function rejectBusiness(req, res) {
   const { reason } = req.body;
   const { data, error } = await supabase
     .from('businesses')
@@ -147,6 +149,34 @@ async function listSubscriptions(req, res) {
   res.json({ subscriptions: data, total: count });
 }
 
+async function rejectDeal(req, res) {
+  const { data, error } = await supabase
+    .from('deals')
+    .update({
+      is_active: false,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', req.params.id)
+    .select()
+    .single();
+
+  if (error) return res.status(400).json({ error: error.message });
+  res.json(data);
+}
+
+async function toggleFeatured(req, res) {
+  const { is_featured } = req.body;
+  const { data, error } = await supabase
+    .from('businesses')
+    .update({ is_featured: !!is_featured, updated_at: new Date().toISOString() })
+    .eq('id', req.params.id)
+    .select()
+    .single();
+
+  if (error) return res.status(400).json({ error: error.message });
+  res.json(data);
+}
+
 async function broadcastNotification(req, res) {
   const { title, body, type = 'system', user_ids } = req.body;
 
@@ -174,7 +204,9 @@ module.exports = {
   rejectBusiness,
   listDeals,
   approveDeal,
+  rejectDeal,
   deleteDeal,
+  toggleFeatured,
   listSubscriptions,
   broadcastNotification,
 };

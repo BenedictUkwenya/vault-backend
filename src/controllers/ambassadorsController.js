@@ -42,20 +42,46 @@ async function getReferrals(req, res) {
 }
 
 async function getRewards(req, res) {
-  const { count, error } = await supabase
-    .from('referrals')
-    .select('id', { count: 'exact', head: true })
-    .eq('referrer_id', req.user.id)
-    .eq('status', 'completed');
+  const [{ count, error: countError }, { data: ledger, error: ledgerError }] = await Promise.all([
+    supabase
+      .from('referrals')
+      .select('id', { count: 'exact', head: true })
+      .eq('referrer_id', req.user.id)
+      .eq('status', 'completed'),
+    supabase
+      .from('ambassador_rewards')
+      .select('*')
+      .eq('user_id', req.user.id)
+      .order('created_at', { ascending: false })
+      .limit(50),
+  ]);
 
-  if (error) return res.status(400).json({ error: error.message });
+  if (countError) return res.status(400).json({ error: countError.message });
+  if (ledgerError && ledgerError.code !== '42P01') return res.status(400).json({ error: ledgerError.message });
+
+  const completed = count || 0;
+  const pendingAmount = (ledger || [])
+    .filter((r) => r.status === 'pending')
+    .reduce((sum, r) => sum + Number(r.amount || 0), 0);
 
   res.json({
     reward_unit: 'completed_referral',
-    completed_referrals: count || 0,
-    pending_rewards: count || 0,
-    ledger: [],
+    completed_referrals: completed,
+    pending_rewards: pendingAmount,
+    ledger: ledger || [],
   });
+}
+
+async function getLeaderboard(_req, res) {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, full_name, avatar_url, referral_count, streak_count')
+    .in('role', ['ambassador', 'user'])
+    .order('referral_count', { ascending: false })
+    .limit(20);
+
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ leaderboard: data || [] });
 }
 
 async function getPayouts(_req, res) {
@@ -89,4 +115,5 @@ module.exports = {
   getRewards,
   getPayouts,
   getCampaigns,
+  getLeaderboard,
 };

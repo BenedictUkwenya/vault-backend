@@ -1,6 +1,7 @@
 const stripe = require('../config/stripe');
 const supabase = require('../config/supabase');
 const logger = require('../config/logger');
+const referralService = require('../services/referralService');
 
 async function webhook(req, res) {
   const sig = req.headers['stripe-signature'];
@@ -85,6 +86,10 @@ async function handleSubscriptionUpsert(sub) {
     cancel_at_period_end: sub.cancel_at_period_end,
     updated_at: new Date().toISOString(),
   }, { onConflict: 'stripe_subscription_id' });
+
+  if (isActive) {
+    await referralService.completeReferral(profile.id);
+  }
 }
 
 async function handleSubscriptionDeleted(sub) {
@@ -110,6 +115,17 @@ async function handleSubscriptionDeleted(sub) {
 
 async function handlePaymentSucceeded(invoice) {
   logger.info('Payment succeeded', { invoice: invoice.id, customer: invoice.customer });
+
+  const customerId = invoice.customer;
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('stripe_customer_id', customerId)
+    .single();
+
+  if (profile) {
+    await referralService.completeReferral(profile.id);
+  }
 }
 
 async function handlePaymentFailed(invoice) {

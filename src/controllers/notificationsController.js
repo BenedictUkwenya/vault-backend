@@ -34,4 +34,15 @@ async function markAllRead(req, res) {
   res.json({ updated: true });
 }
 
-module.exports = { list, markRead, markAllRead };
+async function unreadCount(req, res) {
+  const { count, error } = await supabase
+    .from('notifications')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', req.user.id)
+    .eq('is_read', false);
+
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ count: count || 0 });
+}
+
+module.exports = { list, markRead, markAllRead, unreadCount };

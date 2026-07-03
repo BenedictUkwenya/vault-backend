@@ -74,7 +74,7 @@ function requireBusiness(req, res, next) {
 }
 
 function requireAmbassador(req, res, next) {
-  return requireRole(['ambassador', 'admin'])(req, res, next);
+  return requireRole(['ambassador', 'admin', 'super_admin'])(req, res, next);
 }
 
 /**

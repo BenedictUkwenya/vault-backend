@@ -10,5 +10,6 @@ router.get('/campaigns', asyncHandler(ambassadorsController.getCampaigns));
 router.get('/referrals', asyncHandler(ambassadorsController.getReferrals));
 router.get('/rewards', asyncHandler(ambassadorsController.getRewards));
 router.get('/payouts', asyncHandler(ambassadorsController.getPayouts));
+router.get('/leaderboard', asyncHandler(ambassadorsController.getLeaderboard));
 
 module.exports = router;

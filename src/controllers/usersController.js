@@ -93,4 +93,73 @@ async function walletHistory(req, res) {
   res.json({ history: data || [], total: count || 0, page: Number(page) });
 }
 
-module.exports = { getProfile, updateProfile, getSavings, getFavorites, toggleFavorite, walletHistory };
+async function savePushToken(req, res) {
+  const { token } = req.body;
+  if (!token) return res.status(422).json({ error: 'token required' });
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .update({ push_token: token, updated_at: new Date().toISOString() })
+    .eq('id', req.user.id)
+    .select('id, push_token')
+    .single();
+
+  if (error) return res.status(400).json({ error: error.message });
+  res.json(data);
+}
+
+async function deleteAccount(req, res) {
+  const userId = req.user.id;
+
+  await supabase.from('profiles').update({ is_banned: true }).eq('id', userId);
+  const { error } = await supabase.auth.admin.deleteUser(userId);
+  if (error) return res.status(400).json({ error: error.message });
+
+  res.json({ deleted: true });
+}
+
+async function bumpStreak(req, res) {
+  const { data: profile, error: fetchError } = await supabase
+    .from('profiles')
+    .select('streak_count, last_streak_at')
+    .eq('id', req.user.id)
+    .single();
+
+  if (fetchError) return res.status(400).json({ error: fetchError.message });
+
+  const today = new Date().toISOString().slice(0, 10);
+  const last = profile.last_streak_at ? profile.last_streak_at.slice(0, 10) : null;
+
+  if (last === today) {
+    return res.json({ streak_count: profile.streak_count, already_recorded: true });
+  }
+
+  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  const nextStreak = last === yesterday ? (profile.streak_count || 0) + 1 : 1;
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .update({
+      streak_count: nextStreak,
+      last_streak_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', req.user.id)
+    .select('streak_count')
+    .single();
+
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ streak_count: data.streak_count, already_recorded: false });
+}
+
+module.exports = {
+  getProfile,
+  updateProfile,
+  getSavings,
+  getFavorites,
+  toggleFavorite,
+  walletHistory,
+  savePushToken,
+  deleteAccount,
+  bumpStreak,
+};

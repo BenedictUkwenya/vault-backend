@@ -1,5 +1,6 @@
 const supabase = require('../config/supabase');
 const { validationResult } = require('express-validator');
+const { parseEndDate } = require('../utils/parseEndDate');
 
 async function list(req, res) {
   const { category_id, city, search, type, page = 1, limit = 20 } = req.query;
@@ -9,6 +10,7 @@ async function list(req, res) {
     .from('deals_with_business')
     .select('*', { count: 'exact' })
     .eq('is_active', true)
+    .eq('business_is_approved', true)
     .gt('end_date', new Date().toISOString())
     .range(offset, offset + Number(limit) - 1);
 
@@ -28,6 +30,7 @@ async function dealsOfWeek(req, res) {
     .from('deals_with_business')
     .select('*')
     .eq('is_active', true)
+    .eq('business_is_approved', true)
     .eq('is_deal_of_week', true)
     .gt('end_date', new Date().toISOString())
     .limit(10);
@@ -41,6 +44,7 @@ async function collegeDeals(req, res) {
     .from('deals_with_business')
     .select('*')
     .eq('is_active', true)
+    .eq('business_is_approved', true)
     .eq('is_college_deal', true)
     .gt('end_date', new Date().toISOString())
     .limit(20);
@@ -54,6 +58,7 @@ async function getById(req, res) {
     .from('deals_with_business')
     .select('*')
     .eq('id', req.params.id)
+    .eq('business_is_approved', true)
     .single();
 
   if (error || !data) return res.status(404).json({ error: 'Deal not found' });
@@ -97,6 +102,25 @@ async function redeem(req, res) {
     if (count >= deal.max_redemptions) {
       return res.status(400).json({ error: 'Deal redemption limit reached' });
     }
+  }
+
+  // Block re-redemption after staff has scanned the QR
+  const { data: used } = await supabase
+    .from('redemptions')
+    .select('id, verified_at, redeemed_at')
+    .eq('user_id', userId)
+    .eq('deal_id', dealId)
+    .not('verified_at', 'is', null)
+    .order('verified_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (used) {
+    return res.status(400).json({
+      error: 'You already used this deal. Each member can redeem it once.',
+      already_redeemed: true,
+      verified_at: used.verified_at,
+    });
   }
 
   // Return existing pending (unscanned) redemption instead of creating a duplicate
@@ -145,29 +169,48 @@ async function create(req, res) {
   const {
     title, description, discount_percentage, deal_type, redemption_method,
     terms, end_date, max_redemptions, is_college_deal, requires_paid_tier,
-    image_url, original_price,
+    image_url, images, original_price,
   } = req.body;
 
-  const { data, error } = await supabase
+  let normalizedEndDate;
+  try {
+    normalizedEndDate = parseEndDate(end_date);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+
+  const gallery = Array.isArray(images)
+    ? images.filter((url) => typeof url === 'string' && url.trim()).slice(0, 3)
+    : [];
+  const primaryImage = image_url || gallery[0] || null;
+
+  const insertPayload = {
+    business_id: business.id,
+    title,
+    description,
+    discount_percentage,
+    deal_type: deal_type || 'general',
+    redemption_method: redemption_method || 'qr',
+    terms,
+    end_date: normalizedEndDate,
+    max_redemptions,
+    is_college_deal: is_college_deal || false,
+    requires_paid_tier: requires_paid_tier || false,
+    image_url: primaryImage,
+    images: gallery.length ? gallery : primaryImage ? [primaryImage] : [],
+    original_price,
+    is_active: true,
+  };
+
+  let { data, error } = await supabase.from('deals').insert(insertPayload).select().single();
+
+  if (error && /images/i.test(error.message)) {
+  ({ data, error } = await supabase
     .from('deals')
-    .insert({
-      business_id: business.id,
-      title,
-      description,
-      discount_percentage,
-      deal_type: deal_type || 'general',
-      redemption_method: redemption_method || 'qr',
-      terms,
-      end_date,
-      max_redemptions,
-      is_college_deal: is_college_deal || false,
-      requires_paid_tier: requires_paid_tier || false,
-      image_url,
-      original_price,
-      is_active: true,
-    })
+    .insert({ ...insertPayload, images: undefined })
     .select()
-    .single();
+    .single());
+  }
 
   if (error) return res.status(400).json({ error: error.message });
   res.status(201).json(data);
@@ -183,10 +226,23 @@ async function update(req, res) {
   if (!business) return res.status(403).json({ error: 'Unauthorized' });
 
   const allowed = ['title', 'description', 'discount_percentage', 'terms', 'end_date',
-    'max_redemptions', 'is_college_deal', 'requires_paid_tier', 'image_url', 'is_active'];
+    'max_redemptions', 'is_college_deal', 'requires_paid_tier', 'image_url', 'images', 'is_active'];
   const updates = {};
   for (const key of allowed) {
     if (req.body[key] !== undefined) updates[key] = req.body[key];
+  }
+
+  if (updates.end_date !== undefined) {
+    try {
+      updates.end_date = parseEndDate(updates.end_date);
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+  }
+
+  if (Array.isArray(updates.images)) {
+    updates.images = updates.images.filter((url) => typeof url === 'string' && url.trim()).slice(0, 3);
+    if (!updates.image_url && updates.images[0]) updates.image_url = updates.images[0];
   }
 
   const { data, error } = await supabase
@@ -220,16 +276,45 @@ async function remove(req, res) {
   res.json({ deleted: true });
 }
 
-module.exports = { list, dealsOfWeek, collegeDeals, getById, redeem, verifyRedemption, create, update, remove };
+async function getMyRedemption(req, res) {
+  const userId = req.user.id;
+  const dealId = req.params.id;
+
+  const { data, error } = await supabase
+    .from('redemptions')
+    .select('id, verified_at, redeemed_at')
+    .eq('user_id', userId)
+    .eq('deal_id', dealId)
+    .order('redeemed_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) return res.status(400).json({ error: error.message });
+  if (!data) return res.json({ redemption: null, status: 'none' });
+
+  if (data.verified_at) {
+    return res.json({
+      redemption: data,
+      status: 'verified',
+      verified_at: data.verified_at,
+      qr_data: null,
+    });
+  }
+
+  res.json({
+    redemption: data,
+    status: 'pending',
+    qr_data: data.id,
+  });
+}
 
 async function verifyRedemption(req, res) {
   const { redemption_id } = req.body;
   if (!redemption_id) return res.status(400).json({ error: 'redemption_id required' });
 
-  // Only a business owner can verify — check the caller owns a business
   const { data: business } = await supabase
     .from('businesses')
-    .select('id')
+    .select('id, name')
     .eq('owner_id', req.user.id)
     .single();
 
@@ -237,31 +322,59 @@ async function verifyRedemption(req, res) {
 
   const { data: redemption, error } = await supabase
     .from('redemptions')
-    .select('id, user_id, deal_id, business_id, redeemed_at, deals(title, discount_percentage), profiles(full_name, membership_tier)')
+    .select('id, user_id, deal_id, business_id, redeemed_at, verified_at, deals(title, discount_percentage), profiles(full_name, membership_tier)')
     .eq('id', redemption_id)
     .single();
 
   if (error || !redemption) return res.status(404).json({ error: 'Redemption not found' });
 
-  // Notify the member their deal redemption was verified
+  if (redemption.business_id !== business.id) {
+    return res.status(403).json({ error: 'This redemption belongs to another business' });
+  }
+
+  if (redemption.verified_at) {
+    return res.json({
+      type: 'redemption',
+      is_valid: true,
+      already_used: true,
+      member_name: redemption.profiles?.full_name,
+      membership_tier: redemption.profiles?.membership_tier,
+      deal_title: redemption.deals?.title,
+      discount_percentage: redemption.deals?.discount_percentage,
+      redeemed_at: redemption.redeemed_at,
+      verified_at: redemption.verified_at,
+    });
+  }
+
+  const verifiedAt = new Date().toISOString();
+  const { error: updateErr } = await supabase
+    .from('redemptions')
+    .update({ verified_at: verifiedAt })
+    .eq('id', redemption_id);
+
+  if (updateErr) return res.status(400).json({ error: updateErr.message });
+
   try {
     await supabase.from('notifications').insert({
       user_id: redemption.user_id,
-      title: 'Deal Redeemed Successfully ✅',
-      body: `Your "${redemption.deals?.title}" deal was verified and redeemed.`,
+      title: 'Deal Redeemed Successfully',
+      body: `Your "${redemption.deals?.title}" deal was verified at ${business.name}.`,
       type: 'deal',
-      data: { deal_id: redemption.deal_id },
+      data: { deal_id: redemption.deal_id, business_id: business.id },
     });
   } catch (_) {}
 
   res.json({
     type: 'redemption',
     is_valid: true,
-    already_used: false, // TODO: add verified_at column via Supabase dashboard to enable double-scan detection
+    already_used: false,
     member_name: redemption.profiles?.full_name,
     membership_tier: redemption.profiles?.membership_tier,
     deal_title: redemption.deals?.title,
     discount_percentage: redemption.deals?.discount_percentage,
     redeemed_at: redemption.redeemed_at,
+    verified_at: verifiedAt,
   });
 }
+
+module.exports = { list, dealsOfWeek, collegeDeals, getById, getMyRedemption, redeem, verifyRedemption, create, update, remove };

@@ -32,7 +32,7 @@ async function createCheckout(req, res) {
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('stripe_customer_id, email:id')
+    .select('stripe_customer_id, email')
     .eq('id', req.user.id)
     .single();
 

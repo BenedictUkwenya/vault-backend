@@ -76,10 +76,11 @@ async function resetPassword(req, res) {
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(422).json({ errors: errors.array() });
 
-  const token = req.headers.authorization?.split(' ')[1];
+  if (!req.user?.id) return res.status(401).json({ error: 'Not authenticated' });
+
   const { password } = req.body;
 
-  const { error } = await supabase.auth.admin.updateUserById(req.user?.id, {
+  const { error } = await supabase.auth.admin.updateUserById(req.user.id, {
     password,
   });
   if (error) return res.status(400).json({ error: error.message });

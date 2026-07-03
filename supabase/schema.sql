@@ -132,6 +132,7 @@ CREATE TABLE deals (
   original_price       NUMERIC(10,2),
   terms                TEXT,
   image_url            TEXT,
+  images               TEXT[] DEFAULT '{}',
   end_date             TIMESTAMPTZ NOT NULL,
   max_redemptions      INT,
   redemption_count     INT NOT NULL DEFAULT 0,

@@ -71,6 +71,17 @@ async function completeReferral(referredUserId) {
   if (newCount % REFERRALS_FOR_FREE === 0) {
     await awardFreeMonth(referral.referrer_id);
   }
+
+  // Ambassador rewards ledger entry
+  try {
+    await supabase.from('ambassador_rewards').insert({
+      user_id: referral.referrer_id,
+      amount: 5,
+      reward_type: 'referral',
+      status: 'pending',
+      notes: `Referral completed for user ${referredUserId}`,
+    });
+  } catch (_) {}
 }
 
 async function awardFreeMonth(userId) {

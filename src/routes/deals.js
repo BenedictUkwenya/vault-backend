@@ -16,6 +16,11 @@ router.post(
   authenticate,
   asyncHandler(dealsController.redeem)
 );
+router.get(
+  '/:id/my-redemption',
+  authenticate,
+  asyncHandler(dealsController.getMyRedemption)
+);
 router.post('/verify-redemption', authenticate, asyncHandler(dealsController.verifyRedemption));
 
 // Business portal — create/update/delete

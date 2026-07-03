@@ -113,7 +113,7 @@ async function create(req, res) {
     await _notify(
       bizOwner.owner_id,
       'New Booking Request 🔔',
-      `${req.user.full_name || 'A member'} requested a booking for "${service_requested}".`,
+      `${req.user.user_metadata?.full_name || req.user.email?.split('@')[0] || 'A member'} requested a booking for "${service_requested}".`,
       'booking',
       { booking_id: data.id }
     );
@@ -159,6 +159,11 @@ async function approve(req, res) {
   const booking = await _requireBusinessOwnership(req, req.params.id);
   if (!booking) return res.status(403).json({ error: 'Unauthorized' });
 
+  const { data: current } = await supabase.from('bookings').select('status').eq('id', req.params.id).single();
+  if (!current || current.status !== 'pending') {
+    return res.status(400).json({ error: 'Only pending bookings can be approved' });
+  }
+
   const { data, error } = await supabase
     .from('bookings')
     .update({
@@ -188,6 +193,11 @@ async function deny(req, res) {
   const booking = await _requireBusinessOwnership(req, req.params.id);
   if (!booking) return res.status(403).json({ error: 'Unauthorized' });
 
+  const { data: current } = await supabase.from('bookings').select('status').eq('id', req.params.id).single();
+  if (!current || current.status !== 'pending') {
+    return res.status(400).json({ error: 'Only pending bookings can be denied' });
+  }
+
   const { data, error } = await supabase
     .from('bookings')
     .update({
@@ -213,4 +223,29 @@ async function deny(req, res) {
   res.json(data);
 }
 
-module.exports = { listForUser, listForBusiness, getById, create, cancel, approve, deny };
+async function complete(req, res) {
+  const booking = await _requireBusinessOwnership(req, req.params.id);
+  if (!booking) return res.status(403).json({ error: 'Unauthorized' });
+
+  const { data, error } = await supabase
+    .from('bookings')
+    .update({ status: 'completed', updated_at: new Date().toISOString() })
+    .eq('id', req.params.id)
+    .eq('status', 'approved')
+    .select()
+    .single();
+
+  if (error || !data) return res.status(400).json({ error: 'Cannot complete this booking' });
+
+  await _notify(
+    data.user_id,
+    'Booking Completed',
+    `Your booking for "${data.service_requested}" is marked complete.`,
+    'booking',
+    { booking_id: data.id }
+  );
+
+  res.json(data);
+}
+
+module.exports = { listForUser, listForBusiness, getById, create, cancel, approve, deny, complete };
