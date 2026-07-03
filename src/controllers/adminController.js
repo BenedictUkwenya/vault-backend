@@ -87,6 +87,8 @@ async function approveBusiness(req, res) {
 
   res.json(data);
 }
+
+async function rejectBusiness(req, res) {
   const { reason } = req.body;
   const { data, error } = await supabase
     .from('businesses')
