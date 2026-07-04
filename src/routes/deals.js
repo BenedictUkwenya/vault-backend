@@ -8,6 +8,9 @@ const dealsController = require('../controllers/dealsController');
 router.get('/', asyncHandler(dealsController.list));
 router.get('/week', asyncHandler(dealsController.dealsOfWeek));
 router.get('/college', asyncHandler(dealsController.collegeDeals));
+router.get('/recent', asyncHandler(dealsController.recentDeals));
+router.get('/popular', asyncHandler(dealsController.popularDeals));
+router.get('/events', asyncHandler(dealsController.eventDeals));
 router.get(
   '/:id/my-redemption',
   authenticate,

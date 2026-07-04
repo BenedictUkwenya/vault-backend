@@ -54,6 +54,50 @@ async function collegeDeals(req, res) {
   res.json(data);
 }
 
+async function recentDeals(req, res) {
+  const { data, error } = await supabase
+    .from('deals_with_business')
+    .select('*')
+    .eq('is_active', true)
+    .eq('business_is_approved', true)
+    .gt('end_date', new Date().toISOString())
+    .order('created_at', { ascending: false })
+    .limit(20);
+
+  if (error) return res.status(400).json({ error: error.message });
+  res.json(data);
+}
+
+async function popularDeals(req, res) {
+  const { data, error } = await supabase
+    .from('deals_with_business')
+    .select('*')
+    .eq('is_active', true)
+    .eq('business_is_approved', true)
+    .gt('end_date', new Date().toISOString())
+    .order('redemption_count', { ascending: false })
+    .order('discount_percentage', { ascending: false })
+    .limit(15);
+
+  if (error) return res.status(400).json({ error: error.message });
+  res.json(data);
+}
+
+async function eventDeals(req, res) {
+  const { data, error } = await supabase
+    .from('deals_with_business')
+    .select('*')
+    .eq('is_active', true)
+    .eq('business_is_approved', true)
+    .eq('deal_type', 'entertainment')
+    .gt('end_date', new Date().toISOString())
+    .order('created_at', { ascending: false })
+    .limit(15);
+
+  if (error) return res.status(400).json({ error: error.message });
+  res.json(data);
+}
+
 async function getById(req, res) {
   const { data, error } = await supabase
     .from('deals_with_business')
@@ -386,4 +430,18 @@ async function verifyRedemption(req, res) {
   });
 }
 
-module.exports = { list, dealsOfWeek, collegeDeals, getById, getMyRedemption, redeem, verifyRedemption, create, update, remove };
+module.exports = {
+  list,
+  dealsOfWeek,
+  collegeDeals,
+  recentDeals,
+  popularDeals,
+  eventDeals,
+  getById,
+  getMyRedemption,
+  redeem,
+  verifyRedemption,
+  create,
+  update,
+  remove,
+};
