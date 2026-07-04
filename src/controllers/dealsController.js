@@ -1,6 +1,7 @@
 const supabase = require('../config/supabase');
 const { validationResult } = require('express-validator');
 const { parseEndDate } = require('../utils/parseEndDate');
+const { resolveRedemptionId } = require('../utils/resolveRedemptionId');
 
 async function list(req, res) {
   const { category_id, city, search, type, page = 1, limit = 20 } = req.query;
@@ -320,10 +321,18 @@ async function verifyRedemption(req, res) {
 
   if (!business) return res.status(403).json({ error: 'Only business owners can verify redemptions' });
 
+  let resolvedId;
+  try {
+    resolvedId = await resolveRedemptionId(supabase, redemption_id, business.id);
+  } catch (e) {
+    return res.status(400).json({ error: e.message });
+  }
+  if (!resolvedId) return res.status(404).json({ error: 'Redemption not found' });
+
   const { data: redemption, error } = await supabase
     .from('redemptions')
     .select('id, user_id, deal_id, business_id, redeemed_at, verified_at, deals(title, discount_percentage), profiles(full_name, membership_tier)')
-    .eq('id', redemption_id)
+    .eq('id', resolvedId)
     .single();
 
   if (error || !redemption) return res.status(404).json({ error: 'Redemption not found' });
@@ -350,7 +359,7 @@ async function verifyRedemption(req, res) {
   const { error: updateErr } = await supabase
     .from('redemptions')
     .update({ verified_at: verifiedAt })
-    .eq('id', redemption_id);
+    .eq('id', resolvedId);
 
   if (updateErr) return res.status(400).json({ error: updateErr.message });
 
