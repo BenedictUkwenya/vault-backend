@@ -4,10 +4,15 @@ const { authenticate, requireBusiness } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
 const dealsController = require('../controllers/dealsController');
 
-// Public
+// Public — specific routes before /:id
 router.get('/', asyncHandler(dealsController.list));
 router.get('/week', asyncHandler(dealsController.dealsOfWeek));
 router.get('/college', asyncHandler(dealsController.collegeDeals));
+router.get(
+  '/:id/my-redemption',
+  authenticate,
+  asyncHandler(dealsController.getMyRedemption)
+);
 router.get('/:id', asyncHandler(dealsController.getById));
 
 // Auth required
@@ -15,11 +20,6 @@ router.post(
   '/:id/redeem',
   authenticate,
   asyncHandler(dealsController.redeem)
-);
-router.get(
-  '/:id/my-redemption',
-  authenticate,
-  asyncHandler(dealsController.getMyRedemption)
 );
 router.post('/verify-redemption', authenticate, asyncHandler(dealsController.verifyRedemption));
 
