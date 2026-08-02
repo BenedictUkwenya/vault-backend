@@ -8,7 +8,9 @@ router.use(authenticate, requireAdmin);
 
 router.get('/stats', asyncHandler(adminController.stats));
 router.get('/users', asyncHandler(adminController.listUsers));
+router.get('/users/:id', asyncHandler(adminController.getUser));
 router.patch('/users/:id', asyncHandler(adminController.updateUser));
+router.post('/users/:id/notify', asyncHandler(adminController.notifyUser));
 router.get('/businesses', asyncHandler(adminController.listBusinesses));
 router.patch('/businesses/:id/approve', asyncHandler(adminController.approveBusiness));
 router.patch('/businesses/:id/reject', asyncHandler(adminController.rejectBusiness));

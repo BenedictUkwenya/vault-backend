@@ -18,7 +18,7 @@ async function stats(req, res) {
 }
 
 async function listUsers(req, res) {
-  const { page = 1, limit = 50, search } = req.query;
+  const { page = 1, limit = 50, search, role, tier, banned } = req.query;
   const offset = (page - 1) * limit;
 
   let query = supabase
@@ -27,7 +27,14 @@ async function listUsers(req, res) {
     .range(offset, offset + Number(limit) - 1)
     .order('created_at', { ascending: false });
 
-  if (search) query = query.ilike('full_name', `%${search}%`);
+  if (search) {
+    const q = String(search).trim();
+    query = query.or(`full_name.ilike.%${q}%,email.ilike.%${q}%`);
+  }
+  if (role && role !== 'all') query = query.eq('role', role);
+  if (tier && tier !== 'all') query = query.eq('membership_tier', tier);
+  if (banned === 'true') query = query.eq('is_banned', true);
+  else if (banned === 'false') query = query.eq('is_banned', false);
 
   const { data, error, count } = await query;
   if (error) return res.status(400).json({ error: error.message });
@@ -35,9 +42,37 @@ async function listUsers(req, res) {
   res.json({ users: data, total: count });
 }
 
+async function getUser(req, res) {
+  const { id } = req.params;
+  const { data: user, error } = await supabase.from('profiles').select('*').eq('id', id).single();
+  if (error || !user) return res.status(404).json({ error: 'User not found' });
+
+  const [bookings, redemptions, business] = await Promise.all([
+    supabase.from('bookings').select('id', { count: 'exact', head: true }).eq('user_id', id),
+    supabase.from('redemptions').select('id', { count: 'exact', head: true }).eq('user_id', id),
+    supabase.from('businesses').select('id, name, is_approved, city').eq('owner_id', id).maybeSingle(),
+  ]);
+
+  res.json({
+    ...user,
+    bookings_count: bookings.count || 0,
+    redemptions_count: redemptions.count || 0,
+    business: business.data || null,
+  });
+}
+
 async function updateUser(req, res) {
   const { id } = req.params;
-  const allowed = ['role', 'membership_tier', 'membership_expires_at', 'is_banned'];
+  const allowed = [
+    'role',
+    'membership_tier',
+    'membership_expires_at',
+    'is_banned',
+    'full_name',
+    'city',
+    'avatar_url',
+    'streak_count',
+  ];
   const updates = {};
   for (const key of allowed) {
     if (req.body[key] !== undefined) updates[key] = req.body[key];
@@ -52,6 +87,21 @@ async function updateUser(req, res) {
 
   if (error) return res.status(400).json({ error: error.message });
   res.json(data);
+}
+
+async function notifyUser(req, res) {
+  const { id } = req.params;
+  const { title, body, type = 'system' } = req.body;
+  if (!title || !body) return res.status(422).json({ error: 'title and body required' });
+
+  const { error } = await supabase.from('notifications').insert({
+    user_id: id,
+    title,
+    body,
+    type,
+  });
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ sent: true });
 }
 
 async function listBusinesses(req, res) {
@@ -236,7 +286,9 @@ async function broadcastNotification(req, res) {
 module.exports = {
   stats,
   listUsers,
+  getUser,
   updateUser,
+  notifyUser,
   listBusinesses,
   approveBusiness,
   rejectBusiness,
