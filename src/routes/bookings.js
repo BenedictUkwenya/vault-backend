@@ -12,8 +12,8 @@ router.post(
   authenticate,
   [
     body('business_id').notEmpty(),
-    body('preferred_date').isISO8601(),
-    body('preferred_time').matches(/^\d{2}:\d{2}$/),
+    body('preferred_date').matches(/^\d{4}-\d{2}-\d{2}/),
+    body('preferred_time').matches(/^\d{1,2}:\d{2}$/),
     body('service_requested').trim().notEmpty(),
   ],
   asyncHandler(bookingsController.create)

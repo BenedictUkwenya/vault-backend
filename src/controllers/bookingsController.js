@@ -1,5 +1,6 @@
 const supabase = require('../config/supabase');
 const { validationResult } = require('express-validator');
+const { assertSlotBookable } = require('./availabilityController');
 
 // ── Notification helper ───────────────────────────────────────────────────────
 async function _notify(userId, title, body, type = 'booking', data = {}) {
@@ -76,6 +77,15 @@ async function create(req, res) {
 
   const { business_id, deal_id, service_requested, preferred_date, preferred_time, notes } = req.body;
 
+  // Accept YYYY-MM-DD even if client sent a full ISO datetime
+  const dateOnly =
+    typeof preferred_date === 'string' && preferred_date.includes('T')
+      ? preferred_date.slice(0, 10)
+      : preferred_date;
+
+  const slotCheck = await assertSlotBookable(business_id, dateOnly, preferred_time);
+  if (!slotCheck.ok) return res.status(slotCheck.status).json({ error: slotCheck.error });
+
   const { data, error } = await supabase
     .from('bookings')
     .insert({
@@ -83,15 +93,20 @@ async function create(req, res) {
       business_id,
       deal_id: deal_id || null,
       service_requested,
-      preferred_date,
-      preferred_time,
+      preferred_date: dateOnly,
+      preferred_time: slotCheck.time,
       notes,
       status: 'pending',
     })
     .select()
     .single();
 
-  if (error) return res.status(400).json({ error: error.message });
+  if (error) {
+    if (error.code === '23505') {
+      return res.status(409).json({ error: 'That slot was just taken' });
+    }
+    return res.status(400).json({ error: error.message });
+  }
 
   // Notify the member their booking is received
   await _notify(
@@ -133,6 +148,23 @@ async function cancel(req, res) {
     .single();
 
   if (error || !data) return res.status(400).json({ error: 'Cannot cancel this booking' });
+
+  const { data: bizOwner } = await supabase
+    .from('businesses')
+    .select('owner_id, name')
+    .eq('id', data.business_id)
+    .single();
+
+  if (bizOwner) {
+    await _notify(
+      bizOwner.owner_id,
+      'Booking Cancelled',
+      `A member cancelled their booking for "${data.service_requested}" on ${data.preferred_date} at ${data.preferred_time}.`,
+      'booking',
+      { booking_id: data.id }
+    );
+  }
+
   res.json(data);
 }
 
