@@ -45,4 +45,15 @@ async function unreadCount(req, res) {
   res.json({ count: count || 0 });
 }
 
-module.exports = { list, markRead, markAllRead, unreadCount };
+async function remove(req, res) {
+  const { error } = await supabase
+    .from('notifications')
+    .delete()
+    .eq('id', req.params.id)
+    .eq('user_id', req.user.id);
+
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ deleted: true });
+}
+
+module.exports = { list, markRead, markAllRead, unreadCount, remove };

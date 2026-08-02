@@ -7,5 +7,6 @@ router.get('/', authenticate, asyncHandler(notificationsController.list));
 router.get('/unread-count', authenticate, asyncHandler(notificationsController.unreadCount));
 router.post('/:id/read', authenticate, asyncHandler(notificationsController.markRead));
 router.post('/read-all', authenticate, asyncHandler(notificationsController.markAllRead));
+router.delete('/:id', authenticate, asyncHandler(notificationsController.remove));
 
 module.exports = router;
