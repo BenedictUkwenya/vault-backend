@@ -40,6 +40,36 @@ async function dealsOfWeek(req, res) {
   res.json(data);
 }
 
+async function dealsOfMonth(req, res) {
+  // Curated “deal of the month” flags when present
+  const curated = await supabase
+    .from('deals_with_business')
+    .select('*')
+    .eq('is_active', true)
+    .eq('business_is_approved', true)
+    .eq('is_deal_of_month', true)
+    .gt('end_date', new Date().toISOString())
+    .limit(10);
+
+  if (!curated.error && curated.data?.length) {
+    return res.json(curated.data);
+  }
+
+  // Fallback: strongest live offers (same ranking as popular)
+  const { data, error } = await supabase
+    .from('deals_with_business')
+    .select('*')
+    .eq('is_active', true)
+    .eq('business_is_approved', true)
+    .gt('end_date', new Date().toISOString())
+    .order('redemption_count', { ascending: false })
+    .order('discount_percentage', { ascending: false })
+    .limit(12);
+
+  if (error) return res.status(400).json({ error: error.message });
+  res.json(data || []);
+}
+
 async function collegeDeals(req, res) {
   const { data, error } = await supabase
     .from('deals_with_business')
@@ -433,6 +463,7 @@ async function verifyRedemption(req, res) {
 module.exports = {
   list,
   dealsOfWeek,
+  dealsOfMonth,
   collegeDeals,
   recentDeals,
   popularDeals,

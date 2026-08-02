@@ -107,6 +107,8 @@ CREATE TABLE businesses (
   images           TEXT[] DEFAULT '{}',
   is_approved      BOOLEAN NOT NULL DEFAULT FALSE,
   is_verified      BOOLEAN NOT NULL DEFAULT FALSE,
+  is_founding_member BOOLEAN NOT NULL DEFAULT FALSE,
+  founding_member_number INT,
   rejection_reason TEXT,
   rating_avg       NUMERIC(3,2) NOT NULL DEFAULT 0,
   view_count       INT NOT NULL DEFAULT 0,
@@ -139,6 +141,7 @@ CREATE TABLE deals (
   is_active            BOOLEAN NOT NULL DEFAULT TRUE,
   is_college_deal      BOOLEAN NOT NULL DEFAULT FALSE,
   is_deal_of_week      BOOLEAN NOT NULL DEFAULT FALSE,
+  is_deal_of_month     BOOLEAN NOT NULL DEFAULT FALSE,
   requires_paid_tier   BOOLEAN NOT NULL DEFAULT FALSE,
   created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -275,6 +278,26 @@ CREATE TABLE feedback (
   message     TEXT NOT NULL,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- media_posts (one row = one creative; platforms are outbound links)
+CREATE TABLE media_posts (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  title TEXT NOT NULL,
+  caption TEXT,
+  thumbnail_url TEXT,
+  video_url TEXT,
+  video_provider TEXT NOT NULL DEFAULT 'youtube'
+    CHECK (video_provider IN ('youtube', 'file', 'external')),
+  platforms JSONB NOT NULL DEFAULT '[]'::jsonb,
+  published_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  is_published BOOLEAN NOT NULL DEFAULT TRUE,
+  sort_order INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_media_posts_published
+  ON media_posts(is_published, sort_order, published_at DESC);
 
 -- ============================================================
 -- VIEWS

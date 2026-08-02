@@ -85,7 +85,43 @@ async function approveBusiness(req, res) {
 
   if (data?.owner_id) await ensureBusinessRole(data.owner_id);
 
-  res.json(data);
+  // First 100 approved partners get Founding Member status
+  let result = data;
+  if (data && !data.is_founding_member) {
+    const { count } = await supabase
+      .from('businesses')
+      .select('id', { count: 'exact', head: true })
+      .eq('is_founding_member', true);
+
+    const foundingCount = count || 0;
+    if (foundingCount < 100) {
+      const { data: top } = await supabase
+        .from('businesses')
+        .select('founding_member_number')
+        .eq('is_founding_member', true)
+        .order('founding_member_number', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const nextNumber = Math.min(100, (top?.founding_member_number || 0) + 1);
+
+      const { data: awarded, error: awardError } = await supabase
+        .from('businesses')
+        .update({
+          is_founding_member: true,
+          founding_member_number: nextNumber,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', data.id)
+        .eq('is_founding_member', false)
+        .select()
+        .single();
+
+      if (!awardError && awarded) result = awarded;
+    }
+  }
+
+  res.json(result);
 }
 
 async function rejectBusiness(req, res) {

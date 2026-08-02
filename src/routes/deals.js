@@ -7,6 +7,7 @@ const dealsController = require('../controllers/dealsController');
 // Public — specific routes before /:id
 router.get('/', asyncHandler(dealsController.list));
 router.get('/week', asyncHandler(dealsController.dealsOfWeek));
+router.get('/month', asyncHandler(dealsController.dealsOfMonth));
 router.get('/college', asyncHandler(dealsController.collegeDeals));
 router.get('/recent', asyncHandler(dealsController.recentDeals));
 router.get('/popular', asyncHandler(dealsController.popularDeals));

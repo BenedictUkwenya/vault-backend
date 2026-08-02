@@ -24,4 +24,10 @@ router.delete('/locations/:id', asyncHandler(locationsController.remove));
 router.get('/subscriptions', asyncHandler(adminController.listSubscriptions));
 router.post('/notifications/broadcast', asyncHandler(adminController.broadcastNotification));
 
+const mediaController = require('../controllers/mediaController');
+router.get('/media', asyncHandler(mediaController.listAdmin));
+router.post('/media', asyncHandler(mediaController.create));
+router.patch('/media/:id', asyncHandler(mediaController.update));
+router.delete('/media/:id', asyncHandler(mediaController.remove));
+
 module.exports = router;
