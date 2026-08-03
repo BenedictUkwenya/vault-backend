@@ -1,5 +1,6 @@
 const supabase = require('../config/supabase');
 const { ensureBusinessRole } = require('../utils/ensureBusinessRole');
+const membership = require('../services/membershipService');
 
 async function listCategories(req, res) {
   const { data, error } = await supabase
@@ -23,9 +24,7 @@ async function scanMember(req, res) {
   if (error || !profile) return res.status(404).json({ error: 'Member not found' });
 
   const isValid =
-    profile.membership_tier === 'paid'
-      ? !profile.membership_expires_at || new Date(profile.membership_expires_at) > new Date()
-      : true;
+    membership.isMembershipActive(profile) || profile.membership_tier === 'free';
 
   // Look up the scanning business name for the notification
   const { data: business } = await supabase
@@ -41,7 +40,7 @@ async function scanMember(req, res) {
     await supabase.from('notifications').insert({
       user_id: profile.id,
       title: 'Membership Card Scanned 🔍',
-      body: `Your Vault membership card was scanned at ${businessName}.`,
+      body: `Your Black Limitless membership card was scanned at ${businessName}.`,
       type: 'system',
       data: { scanned_by_business: businessName },
     });
@@ -50,11 +49,12 @@ async function scanMember(req, res) {
   res.json({
     id: profile.id,
     full_name: profile.full_name,
-    membership_tier: profile.membership_tier,
+    membership_tier: membership.normalizeTier(profile.membership_tier),
     membership_expires_at: profile.membership_expires_at,
     referral_code: profile.referral_code,
     avatar_url: profile.avatar_url,
     is_valid: isValid,
+    is_paid: membership.isMembershipActive(profile),
   });
 }
 
@@ -284,6 +284,41 @@ async function myVote(req, res) {
   res.json({ voted: !!data, vote: data || null });
 }
 
+async function foundingWall(req, res) {
+  const { data, error } = await supabase
+    .from('businesses')
+    .select(
+      'id, name, logo_url, cover_url, city, state, category_id, is_founding_member, founding_member_number, description'
+    )
+    .eq('is_approved', true)
+    .eq('is_founding_member', true)
+    .order('founding_member_number', { ascending: true })
+    .limit(100);
+
+  if (error) return res.status(400).json({ error: error.message });
+
+  res.json({
+    title: 'Founding Business Wall',
+    subtitle:
+      'The first 100 businesses to join Black Limitless — permanent recognition as original partners who helped launch the platform.',
+    businesses: data || [],
+    total: (data || []).length,
+    capacity: 100,
+  });
+}
+
 module.exports = {
-  listCategories, scanMember, list, trending, getById, register, getMy, updateMy, getAnalytics, vote, voteResults, myVote,
+  listCategories,
+  scanMember,
+  list,
+  trending,
+  getById,
+  register,
+  getMy,
+  updateMy,
+  getAnalytics,
+  vote,
+  voteResults,
+  myVote,
+  foundingWall,
 };

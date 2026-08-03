@@ -1,4 +1,5 @@
 const supabase = require('../config/supabase');
+const membership = require('../services/membershipService');
 
 const SUPER_ADMIN = 'super_admin';
 
@@ -32,7 +33,7 @@ async function authenticate(req, res, next) {
   req.user = data.user;
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role, membership_tier, membership_expires_at, referral_code, is_banned')
+    .select('role, membership_tier, membership_expires_at, referral_code, is_banned, student_verified_at')
     .eq('id', data.user.id)
     .single();
 
@@ -78,17 +79,12 @@ function requireAmbassador(req, res, next) {
 }
 
 /**
- * Requires the authenticated user to have an active paid membership.
+ * Requires an active paid membership (student / member / vip).
  */
 async function requirePaid(req, res, next) {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
 
-  const isPaid =
-    req.profile?.membership_tier === 'paid' &&
-    (!req.profile.membership_expires_at ||
-      new Date(req.profile.membership_expires_at) > new Date());
-
-  if (!isPaid) {
+  if (!membership.isMembershipActive(req.profile)) {
     return res.status(403).json({ error: 'Paid membership required' });
   }
 

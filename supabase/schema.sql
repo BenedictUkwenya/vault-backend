@@ -42,7 +42,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- ENUMS
 -- ============================================================
 CREATE TYPE user_role AS ENUM ('user', 'business', 'ambassador', 'admin', 'super_admin');
-CREATE TYPE membership_tier AS ENUM ('free', 'paid');
+CREATE TYPE membership_tier AS ENUM ('free', 'student', 'member', 'vip');
 CREATE TYPE deal_type AS ENUM ('general', 'food', 'retail', 'entertainment', 'wellness', 'travel', 'service');
 CREATE TYPE redemption_method AS ENUM ('qr', 'code', 'show_card');
 CREATE TYPE booking_status AS ENUM ('pending', 'approved', 'denied', 'cancelled', 'completed');
@@ -65,6 +65,7 @@ CREATE TABLE profiles (
   role           user_role NOT NULL DEFAULT 'user',
   membership_tier membership_tier NOT NULL DEFAULT 'free',
   membership_expires_at TIMESTAMPTZ,
+  student_verified_at TIMESTAMPTZ,
   referral_code  TEXT UNIQUE,
   referral_count INT NOT NULL DEFAULT 0,
   streak_count   INT NOT NULL DEFAULT 0,
@@ -109,6 +110,8 @@ CREATE TABLE businesses (
   is_verified      BOOLEAN NOT NULL DEFAULT FALSE,
   is_founding_member BOOLEAN NOT NULL DEFAULT FALSE,
   founding_member_number INT,
+  subscription_status TEXT DEFAULT 'none',
+  subscription_expires_at TIMESTAMPTZ,
   rejection_reason TEXT,
   rating_avg       NUMERIC(3,2) NOT NULL DEFAULT 0,
   view_count       INT NOT NULL DEFAULT 0,
@@ -143,6 +146,7 @@ CREATE TABLE deals (
   is_deal_of_week      BOOLEAN NOT NULL DEFAULT FALSE,
   is_deal_of_month     BOOLEAN NOT NULL DEFAULT FALSE,
   requires_paid_tier   BOOLEAN NOT NULL DEFAULT FALSE,
+  requires_vip_tier    BOOLEAN NOT NULL DEFAULT FALSE,
   created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -166,6 +170,17 @@ CREATE TABLE redemptions (
 CREATE INDEX idx_redemptions_user ON redemptions(user_id);
 CREATE INDEX idx_redemptions_deal ON redemptions(deal_id);
 CREATE INDEX idx_redemptions_business ON redemptions(business_id);
+
+-- passport progress (membership v1 stub)
+CREATE TABLE passport_progress (
+  user_id UUID PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,
+  stamps_count INT NOT NULL DEFAULT 0,
+  last_stamp_at TIMESTAMPTZ,
+  rewards_unlocked INT NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_passport_stamps ON passport_progress(stamps_count DESC);
 
 -- bookings
 CREATE TABLE bookings (

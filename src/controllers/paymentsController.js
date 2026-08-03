@@ -2,6 +2,7 @@ const stripe = require('../config/stripe');
 const supabase = require('../config/supabase');
 const logger = require('../config/logger');
 const referralService = require('../services/referralService');
+const membership = require('../services/membershipService');
 
 async function webhook(req, res) {
   const sig = req.headers['stripe-signature'];
@@ -22,23 +23,19 @@ async function webhook(req, res) {
     switch (event.type) {
       case 'customer.subscription.created':
       case 'customer.subscription.updated': {
-        const sub = event.data.object;
-        await handleSubscriptionUpsert(sub);
+        await handleSubscriptionUpsert(event.data.object);
         break;
       }
       case 'customer.subscription.deleted': {
-        const sub = event.data.object;
-        await handleSubscriptionDeleted(sub);
+        await handleSubscriptionDeleted(event.data.object);
         break;
       }
       case 'invoice.payment_succeeded': {
-        const invoice = event.data.object;
-        await handlePaymentSucceeded(invoice);
+        await handlePaymentSucceeded(event.data.object);
         break;
       }
       case 'invoice.payment_failed': {
-        const invoice = event.data.object;
-        await handlePaymentFailed(invoice);
+        await handlePaymentFailed(event.data.object);
         break;
       }
       default:
@@ -52,9 +49,21 @@ async function webhook(req, res) {
   res.json({ received: true });
 }
 
+function resolveSubMeta(sub) {
+  const metaType = sub.metadata?.subscriptionType || sub.metadata?.subscription_type;
+  const priceId = sub.items?.data?.[0]?.price?.id;
+  const fromPrice = membership.tierFromPriceId(priceId);
+  const isBusiness = metaType === 'business' || priceId === process.env.STRIPE_BUSINESS_PRICE_ID;
+  const memberTier = isBusiness
+    ? null
+    : membership.tierFromCheckoutType(metaType) || fromPrice || 'member';
+  return { isBusiness, memberTier, priceId, metaType: metaType || (isBusiness ? 'business' : 'member') };
+}
+
 async function handleSubscriptionUpsert(sub) {
   const customerId = sub.customer;
   const isActive = sub.status === 'active' || sub.status === 'trialing';
+  const { isBusiness, memberTier, metaType } = resolveSubMeta(sub);
 
   const { data: profile } = await supabase
     .from('profiles')
@@ -67,33 +76,53 @@ async function handleSubscriptionUpsert(sub) {
     return;
   }
 
-  const expiresAt = isActive && sub.current_period_end
-    ? new Date(sub.current_period_end * 1000).toISOString()
-    : null;
+  const expiresAt =
+    isActive && sub.current_period_end
+      ? new Date(sub.current_period_end * 1000).toISOString()
+      : null;
 
-  await supabase.from('profiles').update({
-    membership_tier: isActive ? 'paid' : 'free',
-    membership_expires_at: expiresAt,
-  }).eq('id', profile.id);
+  if (isBusiness) {
+    await supabase
+      .from('businesses')
+      .update({
+        subscription_status: isActive ? 'active' : 'none',
+        subscription_expires_at: expiresAt,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('owner_id', profile.id);
+  } else {
+    await supabase
+      .from('profiles')
+      .update({
+        membership_tier: isActive ? memberTier : 'free',
+        membership_expires_at: expiresAt,
+      })
+      .eq('id', profile.id);
+  }
 
-  await supabase.from('subscriptions').upsert({
-    user_id: profile.id,
-    stripe_subscription_id: sub.id,
-    stripe_customer_id: customerId,
-    status: sub.status,
-    current_period_start: new Date(sub.current_period_start * 1000).toISOString(),
-    current_period_end: new Date(sub.current_period_end * 1000).toISOString(),
-    cancel_at_period_end: sub.cancel_at_period_end,
-    updated_at: new Date().toISOString(),
-  }, { onConflict: 'stripe_subscription_id' });
+  await supabase.from('subscriptions').upsert(
+    {
+      user_id: profile.id,
+      stripe_subscription_id: sub.id,
+      stripe_customer_id: customerId,
+      status: sub.status,
+      subscription_type: metaType,
+      current_period_start: new Date(sub.current_period_start * 1000).toISOString(),
+      current_period_end: new Date(sub.current_period_end * 1000).toISOString(),
+      cancel_at_period_end: sub.cancel_at_period_end,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'stripe_subscription_id' }
+  );
 
-  if (isActive) {
+  if (isActive && !isBusiness) {
     await referralService.completeReferral(profile.id);
   }
 }
 
 async function handleSubscriptionDeleted(sub) {
   const customerId = sub.customer;
+  const { isBusiness } = resolveSubMeta(sub);
 
   const { data: profile } = await supabase
     .from('profiles')
@@ -103,12 +132,27 @@ async function handleSubscriptionDeleted(sub) {
 
   if (!profile) return;
 
-  await supabase.from('profiles').update({
-    membership_tier: 'free',
-    membership_expires_at: null,
-  }).eq('id', profile.id);
+  if (isBusiness) {
+    await supabase
+      .from('businesses')
+      .update({
+        subscription_status: 'none',
+        subscription_expires_at: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('owner_id', profile.id);
+  } else {
+    await supabase
+      .from('profiles')
+      .update({
+        membership_tier: 'free',
+        membership_expires_at: null,
+      })
+      .eq('id', profile.id);
+  }
 
-  await supabase.from('subscriptions')
+  await supabase
+    .from('subscriptions')
     .update({ status: 'canceled', updated_at: new Date().toISOString() })
     .eq('stripe_subscription_id', sub.id);
 }
@@ -139,11 +183,10 @@ async function handlePaymentFailed(invoice) {
 
   if (!profile) return;
 
-  // Notify user of payment failure
   await supabase.from('notifications').insert({
     user_id: profile.id,
     title: 'Payment Failed',
-    body: 'Your Vault membership payment failed. Please update your payment method.',
+    body: 'Your Black Limitless membership payment failed. Please update your payment method.',
     type: 'payment',
   });
 }

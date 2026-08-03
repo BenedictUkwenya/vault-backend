@@ -9,6 +9,7 @@ const availabilityController = require('../controllers/availabilityController');
 router.get('/categories', asyncHandler(businessesController.listCategories));
 router.get('/', asyncHandler(businessesController.list));
 router.get('/trending', asyncHandler(businessesController.trending));
+router.get('/founding-wall', asyncHandler(businessesController.foundingWall));
 router.get('/votes/results', asyncHandler(businessesController.voteResults));
 router.get('/votes/me', authenticate, asyncHandler(businessesController.myVote));
 

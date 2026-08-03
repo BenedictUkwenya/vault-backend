@@ -2,6 +2,8 @@ const supabase = require('../config/supabase');
 const { validationResult } = require('express-validator');
 const { parseEndDate } = require('../utils/parseEndDate');
 const { resolveRedemptionId } = require('../utils/resolveRedemptionId');
+const membership = require('../services/membershipService');
+const passportService = require('../services/passportService');
 
 async function list(req, res) {
   const { category_id, city, search, type, page = 1, limit = 20 } = req.query;
@@ -154,18 +156,57 @@ async function redeem(req, res) {
   if (!deal.is_active) return res.status(400).json({ error: 'Deal is no longer active' });
   if (new Date(deal.end_date) < new Date()) return res.status(400).json({ error: 'Deal has expired' });
 
-  if (deal.requires_paid_tier) {
+  if (deal.requires_vip_tier) {
     const { data: profile } = await supabase
       .from('profiles')
       .select('membership_tier, membership_expires_at')
       .eq('id', userId)
       .single();
 
-    const isPaid =
-      profile?.membership_tier === 'paid' &&
-      (!profile?.membership_expires_at || new Date(profile.membership_expires_at) > new Date());
+    if (!membership.isVip(membership.effectiveTier(profile))) {
+      return res.status(403).json({ error: 'VIP membership required for this offer' });
+    }
+  } else if (deal.requires_paid_tier) {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('membership_tier, membership_expires_at')
+      .eq('id', userId)
+      .single();
 
-    if (!isPaid) return res.status(403).json({ error: 'Paid membership required' });
+    if (!membership.isMembershipActive(profile)) {
+      return res.status(403).json({ error: 'Paid membership required' });
+    }
+  }
+
+  // Monthly redemption cap by membership tier (counts verified redemptions)
+  {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('membership_tier, membership_expires_at')
+      .eq('id', userId)
+      .single();
+
+    const tier = membership.effectiveTier(profile);
+    const limit = membership.redemptionLimitForTier(tier);
+    if (limit != null) {
+      const { start, end } = membership.monthWindow();
+      const { count } = await supabase
+        .from('redemptions')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', userId)
+        .not('verified_at', 'is', null)
+        .gte('verified_at', start)
+        .lt('verified_at', end);
+
+      if ((count || 0) >= limit) {
+        return res.status(403).json({
+          error: `Monthly redemption limit reached (${limit} for ${tier} plan). Upgrade for more.`,
+          redemptions_used: count || 0,
+          redemptions_limit: limit,
+          tier,
+        });
+      }
+    }
   }
 
   if (deal.max_redemptions) {
@@ -436,6 +477,10 @@ async function verifyRedemption(req, res) {
     .eq('id', resolvedId);
 
   if (updateErr) return res.status(400).json({ error: updateErr.message });
+
+  try {
+    await passportService.addStamp(redemption.user_id);
+  } catch (_) {}
 
   try {
     await supabase.from('notifications').insert({

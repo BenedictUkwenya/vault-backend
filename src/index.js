@@ -22,6 +22,7 @@ const ambassadorRoutes = require('./routes/ambassadors');
 const waitlistRoutes = require('./routes/waitlist');
 const feedbackRoutes = require('./routes/feedback');
 const mediaRoutes = require('./routes/media');
+const passportRoutes = require('./routes/passport');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -86,6 +87,7 @@ app.use('/api/ambassadors', ambassadorRoutes);
 app.use('/api/waitlist', waitlistRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/media', mediaRoutes);
+app.use('/api/passport', passportRoutes);
 
 // ── 404 ───────────────────────────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));

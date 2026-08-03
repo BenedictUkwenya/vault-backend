@@ -3,6 +3,7 @@ const { authenticate } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
 const subscriptionsController = require('../controllers/subscriptionsController');
 
+router.get('/plans', asyncHandler(subscriptionsController.getPlans));
 router.get('/status', authenticate, asyncHandler(subscriptionsController.getStatus));
 router.post('/checkout', authenticate, asyncHandler(subscriptionsController.createCheckout));
 router.post('/portal', authenticate, asyncHandler(subscriptionsController.createPortalSession));

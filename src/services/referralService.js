@@ -100,14 +100,14 @@ async function awardFreeMonth(userId) {
   newExpiry.setMonth(newExpiry.getMonth() + 1);
 
   await supabase.from('profiles').update({
-    membership_tier: 'paid',
+    membership_tier: 'member',
     membership_expires_at: newExpiry.toISOString(),
   }).eq('id', userId);
 
   await supabase.from('notifications').insert({
     user_id: userId,
     title: 'Free Month Earned!',
-    body: 'You earned a free month of Vault membership for your referrals!',
+    body: 'You earned a free month of Black Limitless Member access for your referrals!',
     type: 'referral',
   });
 }
