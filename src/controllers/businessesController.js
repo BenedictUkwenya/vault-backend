@@ -101,10 +101,95 @@ async function getById(req, res) {
 
   if (error || !data) return res.status(404).json({ error: 'Business not found' });
 
-  // Increment view count
-  await supabase.rpc('increment_business_views', { business_id: id });
-
+  // Views are recorded separately on screen focus (POST /:id/view)
   res.json(data);
+}
+
+async function recordView(req, res) {
+  const { id } = req.params;
+  const { data: exists, error: findError } = await supabase
+    .from('businesses')
+    .select('id')
+    .eq('id', id)
+    .maybeSingle();
+
+  if (findError || !exists) return res.status(404).json({ error: 'Business not found' });
+
+  const { data: views, error } = await supabase.rpc('increment_business_views', {
+    p_business_id: id,
+  });
+
+  if (error) {
+    // Fallback for DBs still using old param name `business_id`
+    const retry = await supabase.rpc('increment_business_views', { business_id: id });
+    if (retry.error) return res.status(400).json({ error: retry.error.message });
+    return res.json({ views: retry.data ?? null });
+  }
+
+  res.json({ views: views ?? null });
+}
+
+async function rateBusiness(req, res) {
+  const { id } = req.params;
+  const rating = Number(req.body?.rating);
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+    return res.status(400).json({ error: 'Rating must be an integer from 1 to 5' });
+  }
+
+  const { data: existing } = await supabase
+    .from('business_ratings')
+    .select('id')
+    .eq('business_id', id)
+    .eq('user_id', req.user.id)
+    .maybeSingle();
+
+  let error;
+  if (existing?.id) {
+    ({ error } = await supabase
+      .from('business_ratings')
+      .update({ rating, updated_at: new Date().toISOString() })
+      .eq('id', existing.id));
+  } else {
+    ({ error } = await supabase.from('business_ratings').insert({
+      business_id: id,
+      user_id: req.user.id,
+      rating,
+    }));
+  }
+
+  if (error) return res.status(400).json({ error: error.message });
+
+  await supabase.rpc('refresh_business_rating_avg', { p_business_id: id });
+
+  const { data: business } = await supabase
+    .from('businesses_with_stats')
+    .select('id, rating_avg, total_views, name')
+    .eq('id', id)
+    .single();
+
+  const { data: mine } = await supabase
+    .from('business_ratings')
+    .select('rating')
+    .eq('business_id', id)
+    .eq('user_id', req.user.id)
+    .maybeSingle();
+
+  res.json({
+    rating_avg: business?.rating_avg ?? 0,
+    my_rating: mine?.rating ?? rating,
+  });
+}
+
+async function myBusinessRating(req, res) {
+  const { id } = req.params;
+  const { data } = await supabase
+    .from('business_ratings')
+    .select('rating')
+    .eq('business_id', id)
+    .eq('user_id', req.user.id)
+    .maybeSingle();
+
+  res.json({ my_rating: data?.rating ?? null });
 }
 
 async function register(req, res) {
@@ -118,7 +203,7 @@ async function register(req, res) {
     return res.status(409).json({ error: 'You already have a registered business' });
   }
 
-  const { name, category_id, city, address, phone, website, description } = req.body;
+  const { name, category_id, city, address, state, phone, website, description, latitude, longitude } = req.body;
 
   const { data, error } = await supabase
     .from('businesses')
@@ -128,9 +213,12 @@ async function register(req, res) {
       category_id,
       city,
       address,
+      state: state || null,
       phone,
       website,
       description,
+      latitude: latitude != null ? Number(latitude) : null,
+      longitude: longitude != null ? Number(longitude) : null,
       is_approved: false,
     })
     .select()
@@ -158,10 +246,28 @@ async function getMy(req, res) {
 }
 
 async function updateMy(req, res) {
-  const allowed = ['name', 'description', 'address', 'city', 'state', 'phone', 'website', 'logo_url', 'cover_url'];
+  const allowed = [
+    'name',
+    'description',
+    'address',
+    'city',
+    'state',
+    'phone',
+    'website',
+    'logo_url',
+    'cover_url',
+    'latitude',
+    'longitude',
+  ];
   const updates = {};
   for (const key of allowed) {
     if (req.body[key] !== undefined) updates[key] = req.body[key];
+  }
+  if (updates.latitude !== undefined && updates.latitude !== null) {
+    updates.latitude = Number(updates.latitude);
+  }
+  if (updates.longitude !== undefined && updates.longitude !== null) {
+    updates.longitude = Number(updates.longitude);
   }
 
   const { data, error } = await supabase
@@ -255,7 +361,7 @@ async function voteResults(req, res) {
   const start = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
   const { data, error } = await supabase
     .from('business_votes')
-    .select('business_id, businesses(name, logo_url)')
+    .select('business_id, businesses(name, logo_url, is_founding_member, founding_member_number)')
     .gte('created_at', start);
 
   if (error) return res.status(400).json({ error: error.message });
@@ -276,7 +382,7 @@ async function myVote(req, res) {
   const start = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
   const { data } = await supabase
     .from('business_votes')
-    .select('business_id, created_at, businesses(name, logo_url)')
+    .select('business_id, created_at, businesses(name, logo_url, is_founding_member, founding_member_number)')
     .eq('user_id', req.user.id)
     .gte('created_at', start)
     .maybeSingle();
@@ -313,6 +419,9 @@ module.exports = {
   list,
   trending,
   getById,
+  recordView,
+  rateBusiness,
+  myBusinessRating,
   register,
   getMy,
   updateMy,

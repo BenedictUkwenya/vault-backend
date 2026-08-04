@@ -42,6 +42,14 @@ router.post(
 // Public by id
 router.get('/:id/availability', asyncHandler(availabilityController.getPublicAvailability));
 router.get('/:id', asyncHandler(businessesController.getById));
+router.post('/:id/view', asyncHandler(businessesController.recordView));
+router.get('/:id/rating/me', authenticate, asyncHandler(businessesController.myBusinessRating));
+router.post(
+  '/:id/rate',
+  authenticate,
+  [body('rating').isInt({ min: 1, max: 5 })],
+  asyncHandler(businessesController.rateBusiness)
+);
 router.post('/:id/vote', authenticate, asyncHandler(businessesController.vote));
 
 module.exports = router;

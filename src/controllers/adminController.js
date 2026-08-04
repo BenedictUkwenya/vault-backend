@@ -1,4 +1,5 @@
 const supabase = require('../config/supabase');
+const logger = require('../config/logger');
 const { ensureBusinessRole } = require('../utils/ensureBusinessRole');
 
 async function stats(req, res) {
@@ -124,20 +125,22 @@ async function listBusinesses(req, res) {
 }
 
 async function approveBusiness(req, res) {
-  const { data, error } = await supabase
+  const { data: existing, error: fetchError } = await supabase
     .from('businesses')
-    .update({ is_approved: true, updated_at: new Date().toISOString() })
+    .select('id, owner_id, is_founding_member, founding_member_number, is_approved')
     .eq('id', req.params.id)
-    .select()
     .single();
 
-  if (error) return res.status(400).json({ error: error.message });
+  if (fetchError) return res.status(400).json({ error: fetchError.message });
+  if (!existing) return res.status(404).json({ error: 'Business not found' });
 
-  if (data?.owner_id) await ensureBusinessRole(data.owner_id);
+  const patch = {
+    is_approved: true,
+    updated_at: new Date().toISOString(),
+  };
 
-  // First 100 approved partners get Founding Member status
-  let result = data;
-  if (data && !data.is_founding_member) {
+  // First 100 approved partners get Founding Member status (award on approve)
+  if (!existing.is_founding_member) {
     const { count } = await supabase
       .from('businesses')
       .select('id', { count: 'exact', head: true })
@@ -153,25 +156,26 @@ async function approveBusiness(req, res) {
         .limit(1)
         .maybeSingle();
 
-      const nextNumber = Math.min(100, (top?.founding_member_number || 0) + 1);
-
-      const { data: awarded, error: awardError } = await supabase
-        .from('businesses')
-        .update({
-          is_founding_member: true,
-          founding_member_number: nextNumber,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', data.id)
-        .eq('is_founding_member', false)
-        .select()
-        .single();
-
-      if (!awardError && awarded) result = awarded;
+      patch.is_founding_member = true;
+      patch.founding_member_number = Math.min(100, (top?.founding_member_number || 0) + 1);
     }
   }
 
-  res.json(result);
+  const { data, error } = await supabase
+    .from('businesses')
+    .update(patch)
+    .eq('id', req.params.id)
+    .select()
+    .single();
+
+  if (error) {
+    logger.error('approveBusiness failed', { id: req.params.id, error: error.message, patch });
+    return res.status(400).json({ error: error.message });
+  }
+
+  if (data?.owner_id) await ensureBusinessRole(data.owner_id);
+
+  res.json(data);
 }
 
 async function rejectBusiness(req, res) {

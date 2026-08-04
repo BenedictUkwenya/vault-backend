@@ -106,6 +106,8 @@ CREATE TABLE businesses (
   logo_url         TEXT,
   cover_url        TEXT,
   images           TEXT[] DEFAULT '{}',
+  latitude         DOUBLE PRECISION,
+  longitude        DOUBLE PRECISION,
   is_approved      BOOLEAN NOT NULL DEFAULT FALSE,
   is_verified      BOOLEAN NOT NULL DEFAULT FALSE,
   is_founding_member BOOLEAN NOT NULL DEFAULT FALSE,
@@ -350,6 +352,8 @@ SELECT
   b.city            AS business_city,
   b.state           AS business_state,
   b.is_approved     AS business_is_approved,
+  b.is_founding_member AS business_is_founding_member,
+  b.founding_member_number AS business_founding_member_number,
   c.name            AS category_name,
   c.id              AS category_id
 FROM deals d
@@ -363,7 +367,7 @@ SELECT
   c.icon  AS category_icon,
   c.color AS category_color,
   COALESCE(d.active_deals_count, 0)   AS active_deals_count,
-  COALESCE(bv.count, b.view_count, 0) AS total_views
+  COALESCE(bv.count, 0) AS total_views
 FROM businesses b
 LEFT JOIN categories c ON b.category_id = c.id
 LEFT JOIN (
@@ -435,13 +439,26 @@ CREATE OR REPLACE TRIGGER on_redemption_created
   FOR EACH ROW EXECUTE FUNCTION increment_redemption_count();
 
 -- Increment business view count (called via RPC)
-CREATE OR REPLACE FUNCTION increment_business_views(business_id UUID)
-RETURNS VOID LANGUAGE plpgsql AS $$
+CREATE OR REPLACE FUNCTION increment_business_views(p_business_id UUID)
+RETURNS BIGINT
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  new_count BIGINT;
 BEGIN
   INSERT INTO business_views (business_id, count)
-  VALUES (business_id, 1)
+  VALUES (p_business_id, 1)
   ON CONFLICT (business_id) DO UPDATE
-  SET count = business_views.count + 1, updated_at = NOW();
+  SET count = business_views.count + 1,
+      updated_at = NOW()
+  RETURNING count INTO new_count;
+
+  UPDATE businesses
+  SET view_count = new_count,
+      updated_at = NOW()
+  WHERE id = p_business_id;
+
+  RETURN COALESCE(new_count, 1);
 END;
 $$;
 
