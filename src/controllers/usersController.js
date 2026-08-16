@@ -1,4 +1,5 @@
 const supabase = require('../config/supabase');
+const stripeService = require('../services/stripeService');
 
 async function getProfile(req, res) {
   const { data, error } = await supabase
@@ -111,11 +112,33 @@ async function savePushToken(req, res) {
 async function deleteAccount(req, res) {
   const userId = req.user.id;
 
+  // A deleted account must not leave a paid membership billing in Stripe.
+  const { data: subscriptions, error: subscriptionError } = await supabase
+    .from('subscriptions')
+    .select('stripe_subscription_id')
+    .eq('user_id', userId)
+    .in('status', ['active', 'trialing', 'past_due']);
+
+  if (subscriptionError) return res.status(400).json({ error: subscriptionError.message });
+
+  try {
+    await Promise.all(
+      (subscriptions || [])
+        .map((subscription) => subscription.stripe_subscription_id)
+        .filter(Boolean)
+        .map((subscriptionId) => stripeService.cancelSubscriptionImmediately(subscriptionId))
+    );
+  } catch (error) {
+    return res.status(502).json({
+      error: 'Unable to cancel your active membership. Please try again or contact support.',
+    });
+  }
+
   await supabase.from('profiles').update({ is_banned: true }).eq('id', userId);
   const { error } = await supabase.auth.admin.deleteUser(userId);
   if (error) return res.status(400).json({ error: error.message });
 
-  res.json({ deleted: true });
+  res.json({ deleted: true, canceled_subscriptions: subscriptions?.length ?? 0 });
 }
 
 async function bumpStreak(req, res) {
