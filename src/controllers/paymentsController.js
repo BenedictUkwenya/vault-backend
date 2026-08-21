@@ -96,6 +96,7 @@ async function handleSubscriptionUpsert(sub) {
       .update({
         membership_tier: isActive ? memberTier : 'free',
         membership_expires_at: expiresAt,
+        ...(isActive ? { preferred_membership_tier: null } : {}),
       })
       .eq('id', profile.id);
   }

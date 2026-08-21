@@ -21,5 +21,17 @@ router.patch(
   requireAdmin,
   asyncHandler(networkController.updateStatus)
 );
+router.post(
+  '/applications/:id/approve',
+  authenticate,
+  requireAdmin,
+  asyncHandler(networkController.approve)
+);
+router.post(
+  '/applications/:id/reject',
+  authenticate,
+  requireAdmin,
+  asyncHandler(networkController.reject)
+);
 
 module.exports = router;
