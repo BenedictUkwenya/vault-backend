@@ -36,14 +36,25 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || process.env.FRONTEND_URL 
   .map((origin) => origin.trim())
   .filter(Boolean);
 
+function isAllowedOrigin(origin) {
+  if (!origin) return true;
+  if (allowedOrigins.includes('*')) return true;
+  if (allowedOrigins.includes(origin)) return true;
+  // Local Vite / Next for Network + admin
+  if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) return true;
+  // Production Network domain
+  if (/^https:\/\/([a-z0-9-]+\.)?blacklimitless\.com$/.test(origin)) return true;
+  return false;
+}
+
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || allowedOrigins.includes('*')) return callback(null, true);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
-    return callback(new Error(`CORS blocked for origin: ${origin}`));
+    // Never throw — throwing turns OPTIONS into 500 with no CORS headers
+    return callback(null, isAllowedOrigin(origin));
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
+  optionsSuccessStatus: 204,
 }));
 
 // Raw body for Stripe webhooks (must be before express.json)
