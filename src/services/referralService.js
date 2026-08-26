@@ -105,6 +105,7 @@ async function awardFreeMonth(userId) {
   }).eq('id', userId);
 
   try {
+    const notificationService = require('./notificationService');
     await notificationService.createNotification({
       userId,
       title: 'Free Month Earned!',
