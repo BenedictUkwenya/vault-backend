@@ -3,6 +3,7 @@ const supabase = require('../config/supabase');
 const logger = require('../config/logger');
 const referralService = require('../services/referralService');
 const membership = require('../services/membershipService');
+const notificationService = require('../services/notificationService');
 
 async function webhook(req, res) {
   const sig = req.headers['stripe-signature'];
@@ -184,12 +185,14 @@ async function handlePaymentFailed(invoice) {
 
   if (!profile) return;
 
-  await supabase.from('notifications').insert({
-    user_id: profile.id,
-    title: 'Payment Failed',
-    body: 'Your Black Limitless membership payment failed. Please update your payment method.',
-    type: 'payment',
-  });
+  try {
+    await notificationService.createNotification({
+      userId: profile.id,
+      title: 'Payment Failed',
+      body: 'Your Black Limitless membership payment failed. Please update your payment method.',
+      type: 'payment',
+    });
+  } catch (_) {}
 }
 
 module.exports = { webhook };

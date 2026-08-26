@@ -1,5 +1,6 @@
 const supabase = require('../config/supabase');
 const crypto = require('crypto');
+const notificationService = require('./notificationService');
 
 function generateCode() {
   return crypto.randomBytes(4).toString('hex').toUpperCase();
@@ -104,12 +105,14 @@ async function awardFreeMonth(userId) {
     membership_expires_at: newExpiry.toISOString(),
   }).eq('id', userId);
 
-  await supabase.from('notifications').insert({
-    user_id: userId,
-    title: 'Free Month Earned!',
-    body: 'You earned a free month of Black Limitless Member access for your referrals!',
-    type: 'referral',
-  });
+  try {
+    await notificationService.createNotification({
+      userId,
+      title: 'Free Month Earned!',
+      body: 'You earned a free month of Black Limitless Member access for your referrals!',
+      type: 'referral',
+    });
+  } catch (_) {}
 }
 
 module.exports = { generateCode, applyReferral, completeReferral, awardFreeMonth };

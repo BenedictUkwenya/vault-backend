@@ -1,4 +1,8 @@
 const supabase = require('../config/supabase');
+const crypto = require('crypto');
+const emailService = require('../services/emailService');
+const otpService = require('../services/otpService');
+const logger = require('../config/logger');
 
 const VALID_TIERS = ['free', 'student', 'member', 'vip'];
 
@@ -27,6 +31,10 @@ function inviteRedirectUrl() {
     process.env.FRONTEND_URL ||
     'https://www.blacklimitless.com'
   );
+}
+
+function randomTempPassword() {
+  return crypto.randomBytes(24).toString('base64url') + 'Aa1!';
 }
 
 async function apply(req, res) {
@@ -103,6 +111,12 @@ async function apply(req, res) {
     .single();
 
   if (error) return res.status(400).json({ error: error.message });
+
+  try {
+    await emailService.sendApplicationReceivedEmail(emailNorm, fullName);
+  } catch (err) {
+    logger.warn('application received email failed', { email: emailNorm, message: err.message });
+  }
 
   res.status(201).json({
     id: data.id,
@@ -250,29 +264,40 @@ async function approve(req, res) {
       userId = existing.id;
       existingAccount = true;
       await syncProfileAfterInvite(userId, app, preferredTier, { comp });
+      try {
+        const { code } = await otpService.issueOtp(app.email, 'invite_set_password');
+        await emailService.sendNetworkInviteEmail(app.email, {
+          fullName: app.full_name,
+          code,
+        });
+        inviteSent = true;
+      } catch (err) {
+        logger.warn('existing user invite email failed', { message: err.message });
+      }
     } else {
-      const { data: invited, error: inviteErr } = await supabase.auth.admin.inviteUserByEmail(app.email, {
-        data: {
+      const { data: created, error: createErr } = await supabase.auth.admin.createUser({
+        email: app.email,
+        password: randomTempPassword(),
+        email_confirm: true,
+        user_metadata: {
           full_name: app.full_name,
           network_application_id: app.id,
           applicant_type: app.applicant_type,
           preferred_membership_tier: preferredTier,
         },
-        redirectTo: inviteRedirectUrl(),
       });
 
-      if (inviteErr) {
+      if (createErr) {
         const again = await findProfileByEmail(app.email);
         if (again?.id) {
           userId = again.id;
           existingAccount = true;
           await syncProfileAfterInvite(userId, app, preferredTier, { comp });
         } else {
-          throw new Error(inviteErr.message);
+          throw new Error(createErr.message);
         }
       } else {
-        userId = invited?.user?.id;
-        inviteSent = true;
+        userId = created?.user?.id;
         for (let i = 0; i < 5 && userId; i += 1) {
           const { data: profile } = await supabase
             .from('profiles')
@@ -283,6 +308,13 @@ async function approve(req, res) {
           await new Promise((r) => setTimeout(r, 200));
         }
         if (userId) await syncProfileAfterInvite(userId, app, preferredTier, { comp });
+
+        const { code } = await otpService.issueOtp(app.email, 'invite_set_password');
+        await emailService.sendNetworkInviteEmail(app.email, {
+          fullName: app.full_name,
+          code,
+        });
+        inviteSent = true;
       }
     }
   } catch (err) {
@@ -297,7 +329,7 @@ async function approve(req, res) {
 
     return res.status(400).json({
       error: `Invite failed: ${inviteError}`,
-      hint: 'Check Supabase Auth email settings and that the Service Role key is configured.',
+      hint: 'Check RESEND_API_KEY and EMAIL_FROM on the backend.',
     });
   }
 
@@ -343,7 +375,7 @@ async function approve(req, res) {
     complimentary: comp,
     granted_tier: preferredTier,
     message: inviteSent
-      ? `Approved. Invite email sent. ${payHint}`
+      ? `Approved. Invite email sent via Resend with a password setup code. ${payHint}`
       : existingAccount
         ? `Approved. Existing account updated. ${payHint}`
         : `Approved. ${payHint}`,

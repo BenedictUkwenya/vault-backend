@@ -1,12 +1,13 @@
 const supabase = require('../config/supabase');
 const { validationResult } = require('express-validator');
 const { assertSlotBookable } = require('./availabilityController');
+const notificationService = require('../services/notificationService');
 
 // ── Notification helper ───────────────────────────────────────────────────────
 async function _notify(userId, title, body, type = 'booking', data = {}) {
   try {
-    await supabase.from('notifications').insert({
-      user_id: userId,
+    await notificationService.createNotification({
+      userId,
       title,
       body,
       type,

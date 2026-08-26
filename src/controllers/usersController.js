@@ -13,11 +13,13 @@ async function getProfile(req, res) {
 }
 
 async function updateProfile(req, res) {
-  const { full_name, avatar_url, city } = req.body;
+  const { full_name, avatar_url, city, email_notifications, push_notifications } = req.body;
   const updates = {};
   if (full_name !== undefined) updates.full_name = full_name;
   if (avatar_url !== undefined) updates.avatar_url = avatar_url;
   if (city !== undefined) updates.city = city;
+  if (email_notifications !== undefined) updates.email_notifications = !!email_notifications;
+  if (push_notifications !== undefined) updates.push_notifications = !!push_notifications;
 
   const { data, error } = await supabase
     .from('profiles')

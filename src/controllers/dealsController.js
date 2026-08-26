@@ -4,6 +4,7 @@ const { parseEndDate } = require('../utils/parseEndDate');
 const { resolveRedemptionId } = require('../utils/resolveRedemptionId');
 const membership = require('../services/membershipService');
 const passportService = require('../services/passportService');
+const notificationService = require('../services/notificationService');
 
 async function list(req, res) {
   const { category_id, city, search, type, page = 1, limit = 20 } = req.query;
@@ -483,8 +484,8 @@ async function verifyRedemption(req, res) {
   } catch (_) {}
 
   try {
-    await supabase.from('notifications').insert({
-      user_id: redemption.user_id,
+    await notificationService.createNotification({
+      userId: redemption.user_id,
       title: 'Deal Redeemed Successfully',
       body: `Your "${redemption.deals?.title}" deal was verified at ${business.name}.`,
       type: 'deal',

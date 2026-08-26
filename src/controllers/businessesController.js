@@ -1,6 +1,7 @@
 const supabase = require('../config/supabase');
 const { ensureBusinessRole } = require('../utils/ensureBusinessRole');
 const membership = require('../services/membershipService');
+const notificationService = require('../services/notificationService');
 
 async function listCategories(req, res) {
   const { data, error } = await supabase
@@ -37,9 +38,9 @@ async function scanMember(req, res) {
 
   // Notify the scanned member their card was checked
   try {
-    await supabase.from('notifications').insert({
-      user_id: profile.id,
-      title: 'Membership Card Scanned 🔍',
+    await notificationService.createNotification({
+      userId: profile.id,
+      title: 'Membership Card Scanned',
       body: `Your Black Limitless membership card was scanned at ${businessName}.`,
       type: 'system',
       data: { scanned_by_business: businessName },

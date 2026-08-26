@@ -1,6 +1,7 @@
 const supabase = require('../config/supabase');
 const logger = require('../config/logger');
 const { ensureBusinessRole } = require('../utils/ensureBusinessRole');
+const notificationService = require('../services/notificationService');
 
 async function stats(req, res) {
   const [users, businesses, deals, activeSubscriptions] = await Promise.all([
@@ -95,13 +96,16 @@ async function notifyUser(req, res) {
   const { title, body, type = 'system' } = req.body;
   if (!title || !body) return res.status(422).json({ error: 'title and body required' });
 
-  const { error } = await supabase.from('notifications').insert({
-    user_id: id,
-    title,
-    body,
-    type,
-  });
-  if (error) return res.status(400).json({ error: error.message });
+  try {
+    await notificationService.createNotification({
+      userId: id,
+      title,
+      body,
+      type,
+    });
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
   res.json({ sent: true });
 }
 
@@ -274,15 +278,15 @@ async function broadcastNotification(req, res) {
 
   if (!title || !body) return res.status(422).json({ error: 'title and body required' });
 
-  if (user_ids && user_ids.length > 0) {
-    const rows = user_ids.map((id) => ({ user_id: id, title, body, type }));
-    await supabase.from('notifications').insert(rows);
-  } else {
-    // Broadcast to all users in batches
+  let ids = user_ids;
+  if (!ids || !ids.length) {
     const { data: users } = await supabase.from('profiles').select('id');
-    const rows = (users || []).map((u) => ({ user_id: u.id, title, body, type }));
-    if (rows.length) await supabase.from('notifications').insert(rows);
+    ids = (users || []).map((u) => u.id);
   }
+
+  await notificationService.createNotifications(
+    (ids || []).map((id) => ({ userId: id, title, body, type }))
+  );
 
   res.json({ sent: true });
 }
