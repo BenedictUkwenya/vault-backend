@@ -28,6 +28,9 @@ const networkRoutes = require('./routes/network');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Vercel / reverse proxies — required for express-rate-limit behind X-Forwarded-For
+app.set('trust proxy', 1);
+
 // ── Security ──────────────────────────────────────────────────────────────────
 app.use(helmet());
 
