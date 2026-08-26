@@ -1,5 +1,4 @@
 const crypto = require('crypto');
-const { Resend } = require('resend');
 const logger = require('../config/logger');
 
 const APP_NAME = process.env.APP_NAME || 'Black Limitless';
@@ -13,6 +12,7 @@ function getResend() {
     throw new Error('RESEND_API_KEY is not configured');
   }
   if (!resendClient) {
+    const { Resend } = require('resend');
     resendClient = new Resend(process.env.RESEND_API_KEY);
   }
   return resendClient;

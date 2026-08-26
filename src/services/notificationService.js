@@ -1,12 +1,22 @@
-const { Expo } = require('expo-server-sdk');
 const supabase = require('../config/supabase');
 const emailService = require('./emailService');
 const logger = require('../config/logger');
 
-const expo = new Expo();
+let expoClient = null;
+
+function getExpo() {
+  if (!expoClient) {
+    const { Expo } = require('expo-server-sdk');
+    expoClient = new Expo();
+  }
+  return expoClient;
+}
 
 async function sendPush(pushToken, { title, body, data }) {
+  const { Expo } = require('expo-server-sdk');
   if (!pushToken || !Expo.isExpoPushToken(pushToken)) return;
+
+  const expo = getExpo();
 
   const messages = [
     {
