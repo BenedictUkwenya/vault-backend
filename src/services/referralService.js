@@ -1,6 +1,5 @@
 const supabase = require('../config/supabase');
 const crypto = require('crypto');
-const notificationService = require('./notificationService');
 
 function generateCode() {
   return crypto.randomBytes(4).toString('hex').toUpperCase();
