@@ -1,5 +1,6 @@
 const supabase = require('../config/supabase');
 const stripeService = require('../services/stripeService');
+const marketsService = require('../services/marketsService');
 
 async function getProfile(req, res) {
   const { data, error } = await supabase
@@ -13,13 +14,24 @@ async function getProfile(req, res) {
 }
 
 async function updateProfile(req, res) {
-  const { full_name, avatar_url, city, email_notifications, push_notifications } = req.body;
+  const { full_name, avatar_url, city, market_id, email_notifications, push_notifications } = req.body;
   const updates = {};
   if (full_name !== undefined) updates.full_name = full_name;
   if (avatar_url !== undefined) updates.avatar_url = avatar_url;
-  if (city !== undefined) updates.city = city;
   if (email_notifications !== undefined) updates.email_notifications = !!email_notifications;
   if (push_notifications !== undefined) updates.push_notifications = !!push_notifications;
+
+  if (market_id !== undefined) {
+    updates.market_id = market_id || null;
+    if (market_id) {
+      const market = await marketsService.findMarketById(market_id);
+      if (market) updates.city = market.city;
+    }
+  } else if (city !== undefined) {
+    updates.city = city;
+    const market = city ? await marketsService.findMarketByCity(city) : null;
+    updates.market_id = market?.id || null;
+  }
 
   const { data, error } = await supabase
     .from('profiles')

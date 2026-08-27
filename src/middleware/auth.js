@@ -45,6 +45,34 @@ async function authenticate(req, res, next) {
   next();
 }
 
+/** Same as authenticate but continues without a user when no/invalid token. */
+async function optionalAuthenticate(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return next();
+  }
+
+  const token = authHeader.split(' ')[1];
+  const { data, error } = await supabase.auth.getUser(token);
+  if (error || !data.user) {
+    return next();
+  }
+
+  req.user = data.user;
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role, membership_tier, membership_expires_at, referral_code, is_banned, student_verified_at, city, market_id')
+    .eq('id', data.user.id)
+    .single();
+
+  if (profile?.is_banned) {
+    return next();
+  }
+
+  req.profile = profile || null;
+  next();
+}
+
 /**
  * Requires the authenticated user to have one of the provided profile roles.
  * super_admin bypasses all role checks.
@@ -93,6 +121,7 @@ async function requirePaid(req, res, next) {
 
 module.exports = {
   authenticate,
+  optionalAuthenticate,
   requireRole,
   requireAdmin,
   requireBusiness,

@@ -24,6 +24,7 @@ const feedbackRoutes = require('./routes/feedback');
 const mediaRoutes = require('./routes/media');
 const passportRoutes = require('./routes/passport');
 const networkRoutes = require('./routes/network');
+const marketsRoutes = require('./routes/markets');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -104,6 +105,7 @@ app.use('/api/feedback', feedbackRoutes);
 app.use('/api/media', mediaRoutes);
 app.use('/api/passport', passportRoutes);
 app.use('/api/network', networkRoutes);
+app.use('/api/markets', marketsRoutes);
 
 // ── 404 ───────────────────────────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));

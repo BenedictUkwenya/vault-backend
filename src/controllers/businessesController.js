@@ -80,13 +80,16 @@ async function list(req, res) {
 }
 
 async function trending(req, res) {
-  const { data, error } = await supabase
+  const { city } = req.query;
+  let query = supabase
     .from('businesses_with_stats')
     .select('*')
     .eq('is_approved', true)
     .order('is_featured', { ascending: false })
     .order('view_count', { ascending: false })
     .limit(10);
+  if (city) query = query.ilike('city', `%${String(city).trim()}%`);
+  const { data, error } = await query;
 
   if (error) return res.status(400).json({ error: error.message });
   res.json(data);

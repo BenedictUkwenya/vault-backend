@@ -6,6 +6,12 @@ const membership = require('../services/membershipService');
 const passportService = require('../services/passportService');
 const notificationService = require('../services/notificationService');
 
+function applyCityFilter(query, city) {
+  const c = String(city || '').trim();
+  if (!c) return query;
+  return query.ilike('business_city', `%${c}%`);
+}
+
 async function list(req, res) {
   const { category_id, city, search, type, page = 1, limit = 20 } = req.query;
   const offset = (page - 1) * limit;
@@ -30,7 +36,8 @@ async function list(req, res) {
 }
 
 async function dealsOfWeek(req, res) {
-  const { data, error } = await supabase
+  const { city } = req.query;
+  let query = supabase
     .from('deals_with_business')
     .select('*')
     .eq('is_active', true)
@@ -38,14 +45,18 @@ async function dealsOfWeek(req, res) {
     .eq('is_deal_of_week', true)
     .gt('end_date', new Date().toISOString())
     .limit(10);
+  query = applyCityFilter(query, city);
+
+  const { data, error } = await query;
 
   if (error) return res.status(400).json({ error: error.message });
   res.json(data);
 }
 
 async function dealsOfMonth(req, res) {
+  const { city } = req.query;
   // Curated “deal of the month” flags when present
-  const curated = await supabase
+  let curatedQuery = supabase
     .from('deals_with_business')
     .select('*')
     .eq('is_active', true)
@@ -53,13 +64,15 @@ async function dealsOfMonth(req, res) {
     .eq('is_deal_of_month', true)
     .gt('end_date', new Date().toISOString())
     .limit(10);
+  curatedQuery = applyCityFilter(curatedQuery, city);
+  const curated = await curatedQuery;
 
   if (!curated.error && curated.data?.length) {
     return res.json(curated.data);
   }
 
   // Fallback: strongest live offers (same ranking as popular)
-  const { data, error } = await supabase
+  let query = supabase
     .from('deals_with_business')
     .select('*')
     .eq('is_active', true)
@@ -68,6 +81,8 @@ async function dealsOfMonth(req, res) {
     .order('redemption_count', { ascending: false })
     .order('discount_percentage', { ascending: false })
     .limit(12);
+  query = applyCityFilter(query, city);
+  const { data, error } = await query;
 
   if (error) return res.status(400).json({ error: error.message });
   res.json(data || []);
@@ -88,7 +103,8 @@ async function collegeDeals(req, res) {
 }
 
 async function recentDeals(req, res) {
-  const { data, error } = await supabase
+  const { city } = req.query;
+  let query = supabase
     .from('deals_with_business')
     .select('*')
     .eq('is_active', true)
@@ -96,13 +112,16 @@ async function recentDeals(req, res) {
     .gt('end_date', new Date().toISOString())
     .order('created_at', { ascending: false })
     .limit(20);
+  query = applyCityFilter(query, city);
+  const { data, error } = await query;
 
   if (error) return res.status(400).json({ error: error.message });
   res.json(data);
 }
 
 async function popularDeals(req, res) {
-  const { data, error } = await supabase
+  const { city } = req.query;
+  let query = supabase
     .from('deals_with_business')
     .select('*')
     .eq('is_active', true)
@@ -111,6 +130,8 @@ async function popularDeals(req, res) {
     .order('redemption_count', { ascending: false })
     .order('discount_percentage', { ascending: false })
     .limit(15);
+  query = applyCityFilter(query, city);
+  const { data, error } = await query;
 
   if (error) return res.status(400).json({ error: error.message });
   res.json(data);
