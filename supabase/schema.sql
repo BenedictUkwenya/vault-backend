@@ -219,10 +219,13 @@ CREATE TABLE IF NOT EXISTS business_availability_blocks (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   business_id UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
   blocked_date DATE NOT NULL,
+  blocked_time TEXT CHECK (blocked_time IS NULL OR blocked_time ~ '^\d{2}:\d{2}$'),
   reason TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (business_id, blocked_date)
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS business_availability_blocks_unique_slot
+  ON business_availability_blocks (business_id, blocked_date, (COALESCE(blocked_time, '')));
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_bookings_active_slot
   ON bookings (business_id, preferred_date, preferred_time)

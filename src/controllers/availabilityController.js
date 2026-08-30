@@ -60,7 +60,7 @@ async function computeFreeDays(businessId, from, to) {
       .eq('is_active', true),
     supabase
       .from('business_availability_blocks')
-      .select('blocked_date')
+      .select('blocked_date, blocked_time')
       .eq('business_id', businessId)
       .gte('blocked_date', from)
       .lte('blocked_date', to),
@@ -84,7 +84,14 @@ async function computeFreeDays(businessId, from, to) {
     byWeekday[k].sort();
   }
 
-  const blocked = new Set((blocks || []).map((b) => b.blocked_date));
+  const blockedAllDay = new Set();
+  const blockedSlots = new Set();
+  for (const b of blocks || []) {
+    const date = String(b.blocked_date).slice(0, 10);
+    const t = normalizeTime(b.blocked_time);
+    if (!t) blockedAllDay.add(date);
+    else blockedSlots.add(`${date}|${t}`);
+  }
   const heldSet = new Set(
     (held || []).map((b) => `${b.preferred_date}|${normalizeTime(b.preferred_time) || b.preferred_time}`)
   );
@@ -94,11 +101,12 @@ async function computeFreeDays(businessId, from, to) {
   const days = [];
 
   for (const date of eachDateInclusive(from, to)) {
-    if (blocked.has(date)) continue;
+    if (blockedAllDay.has(date)) continue;
     if (date < today) continue;
     const wd = weekdayOfIsoDate(date);
     const slots = (byWeekday[wd] || []).filter((slot) => {
       if (heldSet.has(`${date}|${slot}`)) return false;
+      if (blockedSlots.has(`${date}|${slot}`)) return false;
       if (date === today && slot <= now) return false;
       return true;
     });
@@ -152,10 +160,11 @@ async function getMyAvailability(req, res) {
       .order('slot_time'),
     supabase
       .from('business_availability_blocks')
-      .select('id, blocked_date, reason')
+      .select('id, blocked_date, blocked_time, reason')
       .eq('business_id', business.id)
       .gte('blocked_date', today)
-      .order('blocked_date'),
+      .order('blocked_date')
+      .order('blocked_time'),
   ]);
 
   if (error) return res.status(400).json({ error: error.message });
@@ -233,10 +242,11 @@ async function getMyAvailabilityPayload(businessId) {
       .order('slot_time'),
     supabase
       .from('business_availability_blocks')
-      .select('id, blocked_date, reason')
+      .select('id, blocked_date, blocked_time, reason')
       .eq('business_id', businessId)
       .gte('blocked_date', today)
-      .order('blocked_date'),
+      .order('blocked_date')
+      .order('blocked_time'),
   ]);
 
   const byWeekday = {};
@@ -264,15 +274,66 @@ async function addBlock(req, res) {
     return res.status(422).json({ error: 'blocked_date must be YYYY-MM-DD' });
   }
 
+  let rawTimes = [];
+  if (Array.isArray(req.body.blocked_times)) rawTimes = req.body.blocked_times;
+  else if (req.body.blocked_time) rawTimes = [req.body.blocked_time];
+
+  const times = [];
+  const seen = new Set();
+  for (const raw of rawTimes) {
+    const t = normalizeTime(raw);
+    if (!t) return res.status(422).json({ error: `Invalid time: ${raw}` });
+    if (seen.has(t)) continue;
+    seen.add(t);
+    times.push(t);
+  }
+
+  const allDay = times.length === 0;
+
+  if (allDay) {
+    const { error: delError } = await supabase
+      .from('business_availability_blocks')
+      .delete()
+      .eq('business_id', business.id)
+      .eq('blocked_date', blocked_date);
+    if (delError) return res.status(400).json({ error: delError.message });
+
+    const { data, error } = await supabase
+      .from('business_availability_blocks')
+      .insert({ business_id: business.id, blocked_date, blocked_time: null, reason })
+      .select()
+      .single();
+    if (error) return res.status(400).json({ error: error.message });
+    return res.status(201).json(data);
+  }
+
+  const { error: clearDayError } = await supabase
+    .from('business_availability_blocks')
+    .delete()
+    .eq('business_id', business.id)
+    .eq('blocked_date', blocked_date)
+    .is('blocked_time', null);
+  if (clearDayError) return res.status(400).json({ error: clearDayError.message });
+
+  const { error: clearTimesError } = await supabase
+    .from('business_availability_blocks')
+    .delete()
+    .eq('business_id', business.id)
+    .eq('blocked_date', blocked_date)
+    .in('blocked_time', times);
+  if (clearTimesError) return res.status(400).json({ error: clearTimesError.message });
+
+  const rows = times.map((blocked_time) => ({
+    business_id: business.id,
+    blocked_date,
+    blocked_time,
+    reason,
+  }));
+
   const { data, error } = await supabase
     .from('business_availability_blocks')
-    .upsert(
-      { business_id: business.id, blocked_date, reason },
-      { onConflict: 'business_id,blocked_date' }
-    )
-    .select()
-    .single();
-
+    .insert(rows)
+    .select();
   if (error) return res.status(400).json({ error: error.message });
   res.status(201).json(data);
 }
@@ -281,17 +342,21 @@ async function removeBlock(req, res) {
   const business = await _ownerBusiness(req.user.id);
   if (!business) return res.status(403).json({ error: 'No business found' });
 
-  const blocked_date = req.params.date;
-  if (!blocked_date || !/^\d{4}-\d{2}-\d{2}$/.test(blocked_date)) {
-    return res.status(422).json({ error: 'Invalid date' });
-  }
+  const key = req.params.date || req.params.id;
+  if (!key) return res.status(422).json({ error: 'Invalid block' });
 
-  const { error } = await supabase
+  let query = supabase
     .from('business_availability_blocks')
     .delete()
-    .eq('business_id', business.id)
-    .eq('blocked_date', blocked_date);
+    .eq('business_id', business.id);
 
+  if (/^\d{4}-\d{2}-\d{2}$/.test(key)) {
+    query = query.eq('blocked_date', key);
+  } else {
+    query = query.eq('id', key);
+  }
+
+  const { error } = await query;
   if (error) return res.status(400).json({ error: error.message });
   res.json({ deleted: true });
 }
@@ -323,15 +388,18 @@ async function assertSlotBookable(businessId, preferred_date, preferred_time) {
     return { ok: false, status: 400, error: 'This business is not taking bookings yet' };
   }
 
-  const { data: block } = await supabase
+  const { data: dateBlocks } = await supabase
     .from('business_availability_blocks')
-    .select('id')
+    .select('id, blocked_time')
     .eq('business_id', businessId)
-    .eq('blocked_date', preferred_date)
-    .maybeSingle();
+    .eq('blocked_date', preferred_date);
 
-  if (block) {
-    return { ok: false, status: 400, error: 'This date is unavailable' };
+  const blockedHere = (dateBlocks || []).some((b) => {
+    const t = normalizeTime(b.blocked_time);
+    return !t || t === time;
+  });
+  if (blockedHere) {
+    return { ok: false, status: 400, error: 'That date or time is unavailable' };
   }
 
   const weekday = weekdayOfIsoDate(preferred_date);
