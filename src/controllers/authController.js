@@ -38,7 +38,28 @@ async function register(req, res) {
     .eq('id', data.user.id);
 
   if (referral_code) {
-    await referralService.applyReferral(data.user.id, referral_code);
+    const applied = await referralService.applyReferral(data.user.id, referral_code);
+    if (applied.error) {
+      // Soft fail: account exists; surface warning so client can show it
+      try {
+        const { code: otp } = await otpService.issueOtp(emailNorm, 'signup_verify');
+        await emailService.sendVerifyEmail(emailNorm, otp);
+      } catch (err) {
+        logger.error('register verify email failed', { email: emailNorm, message: err.message });
+        return res.status(500).json({
+          error: 'Account created but verification email failed. Use resend verification.',
+          needs_verification: true,
+          email: emailNorm,
+          referral_warning: applied.error,
+        });
+      }
+      return res.status(201).json({
+        needs_verification: true,
+        email: emailNorm,
+        message: 'Check your email for a verification code.',
+        referral_warning: applied.error,
+      });
+    }
   }
 
   try {

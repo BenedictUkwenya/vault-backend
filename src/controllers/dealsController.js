@@ -505,6 +505,11 @@ async function verifyRedemption(req, res) {
   } catch (_) {}
 
   try {
+    const referralService = require('../services/referralService');
+    await referralService.recordReferralEvent(redemption.user_id, 'deal');
+  } catch (_) {}
+
+  try {
     await notificationService.createNotification({
       userId: redemption.user_id,
       title: 'Deal Redeemed Successfully',

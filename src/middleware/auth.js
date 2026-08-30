@@ -33,7 +33,7 @@ async function authenticate(req, res, next) {
   req.user = data.user;
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role, membership_tier, membership_expires_at, referral_code, is_banned, student_verified_at')
+    .select('role, membership_tier, membership_expires_at, referral_code, is_banned, student_verified_at, ambassador_unlocked_at')
     .eq('id', data.user.id)
     .single();
 
@@ -61,7 +61,7 @@ async function optionalAuthenticate(req, res, next) {
   req.user = data.user;
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role, membership_tier, membership_expires_at, referral_code, is_banned, student_verified_at, city, market_id')
+    .select('role, membership_tier, membership_expires_at, referral_code, is_banned, student_verified_at, city, market_id, ambassador_unlocked_at')
     .eq('id', data.user.id)
     .single();
 
@@ -102,8 +102,20 @@ function requireBusiness(req, res, next) {
   return requireRole(['business', 'admin'])(req, res, next);
 }
 
-function requireAmbassador(req, res, next) {
-  return requireRole(['ambassador', 'admin', 'super_admin'])(req, res, next);
+async function requireAmbassador(req, res, next) {
+  if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
+  if (hasAnyRole(req.profile, ['ambassador', 'admin', 'super_admin'])) {
+    return next();
+  }
+  try {
+    if (req.profile?.ambassador_unlocked_at) return next();
+    const { count } = await supabase
+      .from('referrals')
+      .select('id', { count: 'exact', head: true })
+      .eq('referrer_id', req.user.id);
+    if ((count || 0) > 0) return next();
+  } catch (_) {}
+  return res.status(403).json({ error: 'Ambassador access required' });
 }
 
 /**

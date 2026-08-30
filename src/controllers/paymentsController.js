@@ -118,7 +118,7 @@ async function handleSubscriptionUpsert(sub) {
   );
 
   if (isActive && !isBusiness) {
-    await referralService.completeReferral(profile.id);
+    await referralService.recordReferralEvent(profile.id, 'subscribe');
   }
 }
 
@@ -170,7 +170,7 @@ async function handlePaymentSucceeded(invoice) {
     .single();
 
   if (profile) {
-    await referralService.completeReferral(profile.id);
+    await referralService.recordReferralEvent(profile.id, 'subscribe');
   }
 }
 

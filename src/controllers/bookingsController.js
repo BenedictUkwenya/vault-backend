@@ -270,6 +270,11 @@ async function complete(req, res) {
 
   if (error || !data) return res.status(400).json({ error: 'Cannot complete this booking' });
 
+  try {
+    const referralService = require('../services/referralService');
+    await referralService.recordReferralEvent(data.user_id, 'booking');
+  } catch (_) {}
+
   await _notify(
     data.user_id,
     'Booking Completed',

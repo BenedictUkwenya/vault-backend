@@ -68,6 +68,7 @@ CREATE TABLE profiles (
   student_verified_at TIMESTAMPTZ,
   referral_code  TEXT UNIQUE,
   referral_count INT NOT NULL DEFAULT 0,
+  ambassador_unlocked_at TIMESTAMPTZ,
   streak_count   INT NOT NULL DEFAULT 0,
   total_savings  NUMERIC(10,2) NOT NULL DEFAULT 0,
   stripe_customer_id TEXT UNIQUE,
