@@ -502,7 +502,9 @@ async function verifyRedemption(req, res) {
 
   try {
     await passportService.addStamp(redemption.user_id);
-  } catch (_) {}
+  } catch (stampErr) {
+    console.error('[passport] addStamp failed after verify:', stampErr?.message || stampErr);
+  }
 
   try {
     const referralService = require('../services/referralService');

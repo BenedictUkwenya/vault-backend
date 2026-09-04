@@ -207,7 +207,25 @@ async function register(req, res) {
     return res.status(409).json({ error: 'You already have a registered business' });
   }
 
-  const { name, category_id, city, address, state, phone, website, description, latitude, longitude } = req.body;
+  const {
+    name,
+    category_id,
+    city,
+    address,
+    state,
+    zip,
+    country,
+    phone,
+    email,
+    website,
+    description,
+    latitude,
+    longitude,
+    instagram_handle,
+    facebook_handle,
+    tiktok_handle,
+    twitter_handle,
+  } = req.body;
 
   const { data, error } = await supabase
     .from('businesses')
@@ -218,9 +236,16 @@ async function register(req, res) {
       city,
       address,
       state: state || null,
-      phone,
-      website,
-      description,
+      zip: zip || null,
+      country: country || 'United States',
+      phone: phone || null,
+      email: email || null,
+      website: website || null,
+      description: description || null,
+      instagram_handle: instagram_handle || null,
+      facebook_handle: facebook_handle || null,
+      tiktok_handle: tiktok_handle || null,
+      twitter_handle: twitter_handle || null,
       latitude: latitude != null ? Number(latitude) : null,
       longitude: longitude != null ? Number(longitude) : null,
       is_approved: false,
@@ -256,12 +281,21 @@ async function updateMy(req, res) {
     'address',
     'city',
     'state',
+    'zip',
+    'country',
     'phone',
+    'email',
     'website',
+    'category_id',
     'logo_url',
     'cover_url',
+    'images',
     'latitude',
     'longitude',
+    'instagram_handle',
+    'facebook_handle',
+    'tiktok_handle',
+    'twitter_handle',
   ];
   const updates = {};
   for (const key of allowed) {
@@ -272,6 +306,9 @@ async function updateMy(req, res) {
   }
   if (updates.longitude !== undefined && updates.longitude !== null) {
     updates.longitude = Number(updates.longitude);
+  }
+  if (updates.images !== undefined && !Array.isArray(updates.images)) {
+    return res.status(400).json({ error: 'images must be an array of URLs' });
   }
 
   const { data, error } = await supabase
@@ -417,6 +454,84 @@ async function foundingWall(req, res) {
   });
 }
 
+async function listPosts(req, res) {
+  const { id } = req.params;
+  const { data, error } = await supabase
+    .from('business_posts')
+    .select('id, caption, image_url, created_at')
+    .eq('business_id', id)
+    .order('created_at', { ascending: false })
+    .limit(40);
+
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ posts: data || [] });
+}
+
+async function listMyPosts(req, res) {
+  const { data: business } = await supabase
+    .from('businesses')
+    .select('id')
+    .eq('owner_id', req.user.id)
+    .single();
+  if (!business) return res.status(404).json({ error: 'Business not found' });
+
+  const { data, error } = await supabase
+    .from('business_posts')
+    .select('id, caption, image_url, created_at')
+    .eq('business_id', business.id)
+    .order('created_at', { ascending: false })
+    .limit(40);
+
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ posts: data || [] });
+}
+
+async function createMyPost(req, res) {
+  const { caption, image_url } = req.body;
+  if (!caption?.trim() && !image_url) {
+    return res.status(400).json({ error: 'Add a caption or image' });
+  }
+
+  const { data: business } = await supabase
+    .from('businesses')
+    .select('id')
+    .eq('owner_id', req.user.id)
+    .single();
+  if (!business) return res.status(404).json({ error: 'Business not found' });
+
+  const { data, error } = await supabase
+    .from('business_posts')
+    .insert({
+      business_id: business.id,
+      caption: caption?.trim() || null,
+      image_url: image_url || null,
+    })
+    .select()
+    .single();
+
+  if (error) return res.status(400).json({ error: error.message });
+  res.status(201).json(data);
+}
+
+async function deleteMyPost(req, res) {
+  const { postId } = req.params;
+  const { data: business } = await supabase
+    .from('businesses')
+    .select('id')
+    .eq('owner_id', req.user.id)
+    .single();
+  if (!business) return res.status(404).json({ error: 'Business not found' });
+
+  const { error } = await supabase
+    .from('business_posts')
+    .delete()
+    .eq('id', postId)
+    .eq('business_id', business.id);
+
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ ok: true });
+}
+
 module.exports = {
   listCategories,
   scanMember,
@@ -434,4 +549,8 @@ module.exports = {
   voteResults,
   myVote,
   foundingWall,
+  listPosts,
+  listMyPosts,
+  createMyPost,
+  deleteMyPost,
 };

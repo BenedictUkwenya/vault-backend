@@ -17,6 +17,9 @@ router.get('/votes/me', authenticate, asyncHandler(businessesController.myVote))
 router.patch('/my', authenticate, requireBusiness, asyncHandler(businessesController.updateMy));
 router.get('/my/profile', authenticate, requireBusiness, asyncHandler(businessesController.getMy));
 router.get('/my/analytics', authenticate, requireBusiness, asyncHandler(businessesController.getAnalytics));
+router.get('/my/posts', authenticate, requireBusiness, asyncHandler(businessesController.listMyPosts));
+router.post('/my/posts', authenticate, requireBusiness, asyncHandler(businessesController.createMyPost));
+router.delete('/my/posts/:postId', authenticate, requireBusiness, asyncHandler(businessesController.deleteMyPost));
 router.get('/my/availability', authenticate, requireBusiness, asyncHandler(availabilityController.getMyAvailability));
 router.put('/my/availability', authenticate, requireBusiness, asyncHandler(availabilityController.putMyAvailability));
 router.post('/my/availability/blocks', authenticate, requireBusiness, asyncHandler(availabilityController.addBlock));
@@ -41,6 +44,7 @@ router.post(
 
 // Public by id
 router.get('/:id/availability', asyncHandler(availabilityController.getPublicAvailability));
+router.get('/:id/posts', asyncHandler(businessesController.listPosts));
 router.get('/:id', asyncHandler(businessesController.getById));
 router.post('/:id/view', asyncHandler(businessesController.recordView));
 router.get('/:id/rating/me', authenticate, asyncHandler(businessesController.myBusinessRating));

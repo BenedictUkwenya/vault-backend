@@ -11,7 +11,7 @@ async function list(req, res) {
 }
 
 async function create(req, res) {
-  const { name, city, state, country, is_launched } = req.body;
+  const { name, city, state, country, zip, notes, is_launched } = req.body;
   if (!name || !city) return res.status(422).json({ error: 'name and city required' });
 
   const { data, error } = await supabase
@@ -20,7 +20,9 @@ async function create(req, res) {
       name,
       city: String(city).trim(),
       state: state || null,
-      country: country || 'US',
+      country: country || 'United States',
+      zip: zip || null,
+      notes: notes || null,
       is_launched: is_launched ?? false,
     })
     .select()
@@ -35,7 +37,7 @@ async function update(req, res) {
   const { data: existing } = await supabase.from('markets').select('*').eq('id', id).maybeSingle();
   if (!existing) return res.status(404).json({ error: 'Market not found' });
 
-  const allowed = ['name', 'city', 'state', 'country', 'is_launched', 'waitlist_count'];
+  const allowed = ['name', 'city', 'state', 'country', 'zip', 'notes', 'is_launched', 'waitlist_count'];
   const updates = {};
   for (const key of allowed) {
     if (req.body[key] !== undefined) updates[key] = req.body[key];
