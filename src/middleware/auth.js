@@ -98,6 +98,29 @@ async function requireAdmin(req, res, next) {
   next();
 }
 
+/**
+ * Requires a short-lived admin step-up token (email OTP unlock).
+ * Send header: X-Admin-Action-Token: <token from /admin/security/verify>
+ */
+async function requireAdminStepUp(req, res, next) {
+  const adminSecurityService = require('../services/adminSecurityService');
+  const token = req.headers['x-admin-action-token'];
+  if (!token) {
+    return res.status(403).json({
+      error: 'Admin verification required. Check your email for a code.',
+      code: 'admin_step_up_required',
+    });
+  }
+  const ok = await adminSecurityService.validateSession(req.user.id, String(token));
+  if (!ok) {
+    return res.status(403).json({
+      error: 'Admin verification expired. Request a new code.',
+      code: 'admin_step_up_required',
+    });
+  }
+  next();
+}
+
 function requireBusiness(req, res, next) {
   return requireRole(['business', 'admin'])(req, res, next);
 }
@@ -136,6 +159,7 @@ module.exports = {
   optionalAuthenticate,
   requireRole,
   requireAdmin,
+  requireAdminStepUp,
   requireBusiness,
   requireAmbassador,
   requirePaid,

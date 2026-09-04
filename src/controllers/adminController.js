@@ -291,12 +291,121 @@ async function broadcastNotification(req, res) {
   res.json({ sent: true });
 }
 
+async function securityChallenge(req, res) {
+  const adminSecurityService = require('../services/adminSecurityService');
+  try {
+    const result = await adminSecurityService.requestChallenge(req.user);
+    res.json({
+      message: 'Verification code sent to your admin email.',
+      email_hint: maskEmail(result.email),
+      expires_in_seconds: result.expires_in_seconds,
+    });
+  } catch (err) {
+    logger.error('admin security challenge failed', { message: err.message });
+    res.status(500).json({ error: err.message || 'Could not send verification code' });
+  }
+}
+
+async function securityVerify(req, res) {
+  const adminSecurityService = require('../services/adminSecurityService');
+  const { code } = req.body;
+  if (!code) return res.status(422).json({ error: 'code required' });
+
+  const result = await adminSecurityService.verifyChallenge(req.user, code);
+  if (!result.ok) return res.status(400).json({ error: result.error || 'Invalid code' });
+
+  res.json({
+    action_token: result.action_token,
+    expires_at: result.expires_at,
+    expires_in_seconds: result.expires_in_seconds,
+  });
+}
+
+async function securityStatus(req, res) {
+  const adminSecurityService = require('../services/adminSecurityService');
+  const token = req.headers['x-admin-action-token'];
+  const status = await adminSecurityService.sessionStatus(req.user.id, token ? String(token) : '');
+  res.json(status);
+}
+
+async function securityLogout(req, res) {
+  const adminSecurityService = require('../services/adminSecurityService');
+  await adminSecurityService.revokeSessions(req.user.id);
+  res.json({ revoked: true });
+}
+
+function maskEmail(email) {
+  const [user, domain] = String(email).split('@');
+  if (!domain) return '***';
+  const visible = user.slice(0, 2);
+  return `${visible}***@${domain}`;
+}
+
+async function deleteUser(req, res) {
+  const { id } = req.params;
+  if (id === req.user.id) {
+    return res.status(400).json({ error: 'You cannot delete your own admin account from here.' });
+  }
+
+  const { data: target, error: findErr } = await supabase
+    .from('profiles')
+    .select('id, email, role, full_name')
+    .eq('id', id)
+    .maybeSingle();
+
+  if (findErr || !target) return res.status(404).json({ error: 'User not found' });
+
+  if (target.role === 'super_admin' && req.profile?.role !== 'super_admin') {
+    return res.status(403).json({ error: 'Only a super admin can delete another super admin.' });
+  }
+
+  // Cancel Stripe subscriptions if present
+  try {
+    const stripeService = require('../services/stripeService');
+    const { data: subscriptions } = await supabase
+      .from('subscriptions')
+      .select('stripe_subscription_id')
+      .eq('user_id', id)
+      .in('status', ['active', 'trialing', 'past_due']);
+
+    await Promise.all(
+      (subscriptions || [])
+        .map((s) => s.stripe_subscription_id)
+        .filter(Boolean)
+        .map((subscriptionId) => stripeService.cancelSubscriptionImmediately(subscriptionId).catch(() => null))
+    );
+  } catch (err) {
+    logger.warn('deleteUser stripe cancel skipped', { message: err.message });
+  }
+
+  // Soft-lock profile first in case auth delete partially fails
+  await supabase
+    .from('profiles')
+    .update({ is_banned: true, updated_at: new Date().toISOString() })
+    .eq('id', id);
+
+  const { error } = await supabase.auth.admin.deleteUser(id);
+  if (error) {
+    logger.error('admin deleteUser failed', { id, message: error.message });
+    return res.status(400).json({ error: error.message });
+  }
+
+  logger.info('admin wiped user', {
+    admin_id: req.user.id,
+    deleted_id: id,
+    deleted_email: target.email,
+  });
+
+  res.json({ deleted: true, id, email: target.email });
+}
+
 module.exports = {
   stats,
   listUsers,
   getUser,
   updateUser,
   notifyUser,
+  deleteUser,
   listBusinesses,
   approveBusiness,
   rejectBusiness,
@@ -307,4 +416,8 @@ module.exports = {
   toggleFeatured,
   listSubscriptions,
   broadcastNotification,
+  securityChallenge,
+  securityVerify,
+  securityStatus,
+  securityLogout,
 };

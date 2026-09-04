@@ -101,6 +101,20 @@ async function sendVerifyEmail(to, code) {
   });
 }
 
+async function sendAdminStepUpEmail(to, code) {
+  const subject = `${APP_NAME} admin verification code`;
+  const html = wrapHtml({
+    title: 'Admin verification',
+    bodyHtml: `<p>Someone is trying to use admin tools in the ${APP_NAME} app. Enter this code to unlock admin actions:</p>${codeBlock(code)}<p>If this wasn’t you, change your password and contact support immediately.</p>`,
+  });
+  return sendEmail({
+    to,
+    subject,
+    html,
+    text: `Your ${APP_NAME} admin verification code is ${code}. It expires in 15 minutes. If this wasn’t you, secure your account.`,
+  });
+}
+
 async function sendWelcomeEmail(to, fullName) {
   const name = fullName || 'there';
   const subject = `Welcome to ${APP_NAME}`;
@@ -207,6 +221,7 @@ function hashOtpCode(code) {
 module.exports = {
   sendEmail,
   sendVerifyEmail,
+  sendAdminStepUpEmail,
   sendWelcomeEmail,
   sendPasswordResetCode,
   sendPasswordChangedEmail,

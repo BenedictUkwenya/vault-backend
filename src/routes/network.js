@@ -1,6 +1,6 @@
 const router = require('express').Router();
 const rateLimit = require('express-rate-limit');
-const { authenticate, requireAdmin } = require('../middleware/auth');
+const { authenticate, requireAdmin, requireAdminStepUp } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
 const networkController = require('../controllers/networkController');
 
@@ -19,18 +19,21 @@ router.patch(
   '/applications/:id',
   authenticate,
   requireAdmin,
+  requireAdminStepUp,
   asyncHandler(networkController.updateStatus)
 );
 router.post(
   '/applications/:id/approve',
   authenticate,
   requireAdmin,
+  requireAdminStepUp,
   asyncHandler(networkController.approve)
 );
 router.post(
   '/applications/:id/reject',
   authenticate,
   requireAdmin,
+  requireAdminStepUp,
   asyncHandler(networkController.reject)
 );
 
