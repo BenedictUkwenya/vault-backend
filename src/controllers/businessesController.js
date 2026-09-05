@@ -377,17 +377,24 @@ async function getAnalytics(req, res) {
 
 async function vote(req, res) {
   const { id } = req.params;
+  const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
 
+  // One vote per user per calendar month (any business).
   const { data: existing } = await supabase
     .from('business_votes')
-    .select('id')
-    .eq('business_id', id)
+    .select('id, business_id')
     .eq('user_id', req.user.id)
-    .gte('created_at', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString())
-    .single();
+    .gte('created_at', monthStart)
+    .limit(1)
+    .maybeSingle();
 
   if (existing) {
-    return res.status(409).json({ error: 'You already voted this month' });
+    return res.status(409).json({
+      error:
+        existing.business_id === id
+          ? 'You already voted for this business this month'
+          : 'You already voted this month',
+    });
   }
 
   const { error } = await supabase
