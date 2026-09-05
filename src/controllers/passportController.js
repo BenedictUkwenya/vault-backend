@@ -4,6 +4,8 @@ async function getMine(req, res) {
   try {
     const progress = await passportService.getProgress(req.user.id);
     const stamps = progress.stamps_count || 0;
+    const available = progress.rewards_available || 0;
+    const credits = progress.passport_redemption_credits || 0;
     res.json({
       ...progress,
       copy: {
@@ -11,11 +13,13 @@ async function getMine(req, res) {
         subtitle:
           stamps === 0
             ? 'Redeem a deal at a partner. When they verify it, you earn a stamp.'
-            : 'Every verified visit earns a stamp. Fill the page to unlock a Passport reward.',
+            : 'Every verified visit earns a stamp. Fill the page to unlock a claimable reward.',
         note:
-          progress.rewards_unlocked > 0
-            ? `${progress.rewards_unlocked} reward${progress.rewards_unlocked === 1 ? '' : 's'} unlocked from exploring. Keep collecting — Passport perks keep growing.`
-            : 'Stamps save automatically. Rewards unlock every 5 verified partner visits.',
+          available > 0
+            ? `You have ${available} Passport reward${available === 1 ? '' : 's'} ready to claim.`
+            : credits > 0
+              ? `You have ${credits} bonus redemption credit${credits === 1 ? '' : 's'} banked for when you hit your monthly limit.`
+              : 'Stamps save automatically. Every 5 verified visits unlocks a bonus deal redemption you can claim.',
       },
     });
   } catch (e) {
@@ -23,4 +27,16 @@ async function getMine(req, res) {
   }
 }
 
-module.exports = { getMine };
+async function claimReward(req, res) {
+  try {
+    const grantId = req.params.id;
+    const result = await passportService.claimGrant(req.user.id, grantId);
+    res.json(result);
+  } catch (e) {
+    const msg = e.message || 'Could not claim reward';
+    const status = /not found/i.test(msg) ? 404 : /already claimed/i.test(msg) ? 409 : 400;
+    res.status(status).json({ error: msg });
+  }
+}
+
+module.exports = { getMine, claimReward };

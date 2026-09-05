@@ -106,6 +106,7 @@ app.use('/api/media', mediaRoutes);
 app.use('/api/passport', passportRoutes);
 app.use('/api/network', networkRoutes);
 app.use('/api/markets', marketsRoutes);
+app.use('/api/analytics', require('./routes/analytics'));
 
 // ── 404 ───────────────────────────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));

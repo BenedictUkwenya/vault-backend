@@ -55,24 +55,43 @@ async function update(req, res) {
 
   const launching = !existing.is_launched && data.is_launched;
   if (launching) {
+    const appName = process.env.APP_NAME || 'Black Limitless';
+    const title = `${data.name} is now live!`;
+    const body = `${appName} just launched in ${data.city}. Open the app to explore local deals and businesses.`;
     try {
       const { data: waiters } = await supabase
         .from('waitlist')
         .select('user_id, email')
         .eq('market_id', id);
 
+      const emailed = new Set();
       for (const w of waiters || []) {
-        if (!w.user_id) continue;
-        try {
-          await notificationService.createNotification({
-            userId: w.user_id,
-            title: `${data.name} is now live!`,
-            body: `Black Limitless just launched in ${data.city}. Open the app to explore local deals and businesses.`,
-            type: 'market_launch',
-            data: { market_id: id, city: data.city },
-          });
-        } catch (err) {
-          logger.warn('market launch notify failed', { userId: w.user_id, message: err.message });
+        if (w.user_id) {
+          try {
+            await notificationService.createNotification({
+              userId: w.user_id,
+              title,
+              body,
+              type: 'market_launch',
+              data: { market_id: id, city: data.city },
+            });
+          } catch (err) {
+            logger.warn('market launch notify failed', { userId: w.user_id, message: err.message });
+          }
+        }
+
+        const email = String(w.email || '').trim().toLowerCase();
+        if (email && !emailed.has(email)) {
+          emailed.add(email);
+          try {
+            const emailService = require('../services/emailService');
+            await emailService.sendMarketLaunchEmail(email, {
+              marketName: data.name,
+              city: data.city,
+            });
+          } catch (err) {
+            logger.warn('market launch email failed', { email, message: err.message });
+          }
         }
       }
     } catch (err) {

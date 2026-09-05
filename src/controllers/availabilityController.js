@@ -116,6 +116,16 @@ async function computeFreeDays(businessId, from, to) {
   return {
     schedule_configured: (template || []).length > 0,
     days,
+    blocked_all_day: Array.from(blockedAllDay).sort(),
+    blocked_partial: Array.from(
+      new Set(
+        [...blockedSlots]
+          .map((k) => k.split('|')[0])
+          .filter((date) => date && !blockedAllDay.has(date))
+      )
+    ).sort(),
+    from,
+    to,
   };
 }
 
@@ -128,7 +138,7 @@ async function getPublicAvailability(req, res) {
   if (!to) {
     const [y, m, d] = from.split('-').map(Number);
     const end = new Date(y, m - 1, d);
-    end.setDate(end.getDate() + 29);
+    end.setDate(end.getDate() + 92);
     to = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`;
   }
 

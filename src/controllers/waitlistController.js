@@ -1,5 +1,7 @@
 const supabase = require('../config/supabase');
 const marketsService = require('../services/marketsService');
+const emailService = require('../services/emailService');
+const logger = require('../config/logger');
 
 async function join(req, res) {
   const { email: bodyEmail, city, market_id } = req.body;
@@ -54,10 +56,19 @@ async function join(req, res) {
       .eq('id', req.user.id);
   }
 
+  try {
+    await emailService.sendWaitlistJoinedEmail(email, {
+      marketName: market.name,
+      city: market.city,
+    });
+  } catch (err) {
+    logger.warn('waitlist join email failed', { email, message: err.message });
+  }
+
   res.status(201).json({
     ...data,
     market,
-    message: `You're on the waitlist for ${market.name}. We'll notify you when we launch in ${market.city}.`,
+    message: `You're on the waitlist for ${market.name}. We'll email and notify you when we launch in ${market.city}.`,
   });
 }
 

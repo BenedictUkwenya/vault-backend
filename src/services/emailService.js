@@ -174,6 +174,37 @@ async function sendNotificationEmail(to, { title, body }) {
   });
 }
 
+async function sendWaitlistJoinedEmail(to, { marketName, city }) {
+  const subject = `You're on the ${APP_NAME} waitlist for ${city}`;
+  const html = wrapHtml({
+    title: "You're on the list",
+    bodyHtml: `<p>You're on the waitlist for <strong>${marketName}</strong>.</p>
+      <p>We'll email you and notify you in the app when we launch in ${city}.</p>`,
+  });
+  return sendEmail({
+    to,
+    subject,
+    html,
+    text: `You're on the waitlist for ${marketName}. We'll email and notify you when we launch in ${city}.`,
+  });
+}
+
+async function sendMarketLaunchEmail(to, { marketName, city }) {
+  const subject = `${APP_NAME}: ${marketName} is now live!`;
+  const html = wrapHtml({
+    title: `${marketName} is now live!`,
+    bodyHtml: `<p>${APP_NAME} just launched in <strong>${city}</strong>.</p>
+      <p>Open the app to explore local deals and partner businesses.</p>
+      <p style="margin-top:18px;font-size:13px;color:rgba(255,255,255,0.5);">You're receiving this because you joined a ${APP_NAME} city waitlist.</p>`,
+  });
+  return sendEmail({
+    to,
+    subject,
+    html,
+    text: `${APP_NAME} just launched in ${city}. Open the app to explore local deals and businesses.`,
+  });
+}
+
 async function sendNetworkInviteEmail(to, { fullName, code }) {
   const name = fullName || 'there';
   const subject = `You’re invited to ${APP_NAME}`;
@@ -226,6 +257,8 @@ module.exports = {
   sendPasswordResetCode,
   sendPasswordChangedEmail,
   sendNotificationEmail,
+  sendWaitlistJoinedEmail,
+  sendMarketLaunchEmail,
   sendNetworkInviteEmail,
   sendApplicationReceivedEmail,
   generateOtpCode,

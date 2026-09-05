@@ -221,12 +221,23 @@ async function redeem(req, res) {
         .lt('verified_at', end);
 
       if ((count || 0) >= limit) {
-        return res.status(403).json({
-          error: `Monthly redemption limit reached (${limit} for ${tier} plan). Upgrade for more.`,
-          redemptions_used: count || 0,
-          redemptions_limit: limit,
-          tier,
-        });
+        const passportService = require('../services/passportService');
+        let credits = 0;
+        try {
+          credits = await passportService.getRedemptionCredits(userId);
+        } catch (_) {
+          credits = 0;
+        }
+        if (credits > 0) {
+          req._passportConsumeCredit = true;
+        } else {
+          return res.status(403).json({
+            error: `Monthly redemption limit reached (${limit} for ${tier} plan). Upgrade for more, or claim a Passport bonus credit.`,
+            redemptions_used: count || 0,
+            redemptions_limit: limit,
+            tier,
+          });
+        }
       }
     }
   }
@@ -288,6 +299,16 @@ async function redeem(req, res) {
     .single();
 
   if (redeemErr) return res.status(400).json({ error: redeemErr.message });
+
+  if (req._passportConsumeCredit) {
+    try {
+      const passportService = require('../services/passportService');
+      await passportService.consumeRedemptionCredit(userId);
+    } catch (_) {
+      /* non-fatal — redemption already created */
+    }
+  }
+
   res.json({ redemption, qr_data: redemption.id });
 }
 

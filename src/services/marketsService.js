@@ -83,7 +83,7 @@ async function getStatusForCity(city) {
   return {
     status: 'waitlist',
     market,
-    message: `${market.name} is coming soon. Join the waitlist — we will notify you at launch.`,
+    message: `${market.name} is coming soon. Join the waitlist — we'll email and notify you at launch.`,
   };
 }
 

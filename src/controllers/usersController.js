@@ -58,35 +58,125 @@ async function getFavorites(req, res) {
   const { data, error } = await supabase
     .from('user_favorites')
     .select('business_id, businesses(*)')
-    .eq('user_id', req.user.id);
+    .eq('user_id', req.user.id)
+    .order('created_at', { ascending: false });
 
   if (error) return res.status(400).json({ error: error.message });
-  res.json(data.map((f) => f.businesses));
+  res.json((data || []).map((f) => f.businesses).filter(Boolean));
+}
+
+async function isFavorite(req, res) {
+  const { businessId } = req.params;
+  const { data, error } = await supabase
+    .from('user_favorites')
+    .select('id')
+    .eq('user_id', req.user.id)
+    .eq('business_id', businessId)
+    .maybeSingle();
+
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ favorited: !!data });
 }
 
 async function toggleFavorite(req, res) {
   const { businessId } = req.params;
   const userId = req.user.id;
 
-  const { data: existing } = await supabase
+  if (!businessId) return res.status(400).json({ error: 'businessId required' });
+
+  const { data: biz, error: bizErr } = await supabase
+    .from('businesses')
+    .select('id')
+    .eq('id', businessId)
+    .maybeSingle();
+  if (bizErr) return res.status(400).json({ error: bizErr.message });
+  if (!biz) return res.status(404).json({ error: 'Business not found' });
+
+  const { data: existing, error: findErr } = await supabase
     .from('user_favorites')
     .select('id')
     .eq('user_id', userId)
     .eq('business_id', businessId)
-    .single();
+    .maybeSingle();
+
+  if (findErr) return res.status(400).json({ error: findErr.message });
 
   if (existing) {
-    await supabase
+    const { error: delErr } = await supabase
       .from('user_favorites')
       .delete()
       .eq('user_id', userId)
       .eq('business_id', businessId);
+    if (delErr) return res.status(400).json({ error: delErr.message });
     return res.json({ favorited: false });
   }
 
-  await supabase
+  const { error: insErr } = await supabase
     .from('user_favorites')
     .insert({ user_id: userId, business_id: businessId });
+  if (insErr) return res.status(400).json({ error: insErr.message });
+  res.json({ favorited: true });
+}
+
+async function getDealFavorites(req, res) {
+  const { data, error } = await supabase
+    .from('user_deal_favorites')
+    .select('deal_id, deals(*, businesses(name, logo_url, city))')
+    .eq('user_id', req.user.id)
+    .order('created_at', { ascending: false });
+
+  if (error) return res.status(400).json({ error: error.message });
+  res.json((data || []).map((f) => f.deals).filter(Boolean));
+}
+
+async function isDealFavorite(req, res) {
+  const { dealId } = req.params;
+  const { data, error } = await supabase
+    .from('user_deal_favorites')
+    .select('id')
+    .eq('user_id', req.user.id)
+    .eq('deal_id', dealId)
+    .maybeSingle();
+
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ favorited: !!data });
+}
+
+async function toggleDealFavorite(req, res) {
+  const { dealId } = req.params;
+  const userId = req.user.id;
+  if (!dealId) return res.status(400).json({ error: 'dealId required' });
+
+  const { data: deal, error: dealErr } = await supabase
+    .from('deals')
+    .select('id')
+    .eq('id', dealId)
+    .maybeSingle();
+  if (dealErr) return res.status(400).json({ error: dealErr.message });
+  if (!deal) return res.status(404).json({ error: 'Deal not found' });
+
+  const { data: existing, error: findErr } = await supabase
+    .from('user_deal_favorites')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('deal_id', dealId)
+    .maybeSingle();
+  if (findErr) return res.status(400).json({ error: findErr.message });
+
+  if (existing) {
+    const { error: delErr } = await supabase
+      .from('user_deal_favorites')
+      .delete()
+      .eq('user_id', userId)
+      .eq('deal_id', dealId);
+    if (delErr) return res.status(400).json({ error: delErr.message });
+    return res.json({ favorited: false });
+  }
+
+  const { error: insErr } = await supabase
+    .from('user_deal_favorites')
+    .insert({ user_id: userId, deal_id: dealId });
+  if (insErr) return res.status(400).json({ error: insErr.message });
   res.json({ favorited: true });
 }
 
@@ -194,7 +284,11 @@ module.exports = {
   updateProfile,
   getSavings,
   getFavorites,
+  isFavorite,
   toggleFavorite,
+  getDealFavorites,
+  isDealFavorite,
+  toggleDealFavorite,
   walletHistory,
   savePushToken,
   deleteAccount,
