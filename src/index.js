@@ -76,6 +76,8 @@ const limiter = rateLimit({
   max: 200,
   standardHeaders: true,
   legacyHeaders: false,
+  // Analytics has its own limiter so event batches don't eat into app API quota.
+  skip: (req) => req.path.startsWith('/analytics/'),
 });
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
