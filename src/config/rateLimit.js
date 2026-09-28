@@ -1,8 +1,14 @@
 const rateLimit = require('express-rate-limit');
 const logger = require('./logger');
 
-const url = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
-const token = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
+// Vercel's Upstash integration prefixes these with whatever the project chose (e.g. kv_KV_REST_API_URL).
+function envEndingWith(suffix) {
+  const key = Object.keys(process.env).find((k) => k.toUpperCase().endsWith(suffix) && process.env[k]);
+  return key ? process.env[key] : undefined;
+}
+
+const url = process.env.UPSTASH_REDIS_REST_URL || envEndingWith('KV_REST_API_URL');
+const token = process.env.UPSTASH_REDIS_REST_TOKEN || envEndingWith('KV_REST_API_TOKEN');
 
 let redis = null;
 if (url && token) {
