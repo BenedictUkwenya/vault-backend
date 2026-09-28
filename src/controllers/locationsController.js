@@ -24,6 +24,7 @@ async function create(req, res) {
       zip: zip || null,
       notes: notes || null,
       is_launched: is_launched ?? false,
+      launch_notified_at: is_launched ? new Date().toISOString() : null,
     })
     .select()
     .single();
@@ -53,7 +54,18 @@ async function update(req, res) {
 
   if (error) return res.status(400).json({ error: error.message });
 
-  const launching = !existing.is_launched && data.is_launched;
+  let launching = false;
+  if (!existing.is_launched && data.is_launched) {
+    const { data: claimed, error: claimErr } = await supabase
+      .from('markets')
+      .update({ launch_notified_at: new Date().toISOString() })
+      .eq('id', id)
+      .is('launch_notified_at', null)
+      .select('id')
+      .maybeSingle();
+    if (claimErr) logger.warn('market launch claim failed', { marketId: id, message: claimErr.message });
+    launching = !!claimed;
+  }
   if (launching) {
     const appName = process.env.APP_NAME || 'Black Limitless';
     const title = `${data.name} is now live!`;

@@ -1,5 +1,5 @@
 const router = require('express').Router();
-const rateLimit = require('express-rate-limit');
+const { createLimiter } = require('../config/rateLimit');
 const { authenticate, requireAdmin, requireAdminStepUp } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
 const adminController = require('../controllers/adminController');
@@ -9,7 +9,7 @@ router.use(authenticate, requireAdmin);
 
 // Per-admin limits on the email-code step: each new challenge resets the attempt
 // counter, so code requests themselves have to be capped.
-const stepUpLimiter = rateLimit({
+const stepUpLimiter = createLimiter('admin-stepup', {
   windowMs: 15 * 60 * 1000,
   max: 10,
   keyGenerator: (req) => `stepup:${req.user?.id || req.ip}`,

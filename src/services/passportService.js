@@ -74,24 +74,15 @@ async function syncGrantsFromProgress(userId, stampsCount) {
 }
 
 async function addStamp(userId) {
-  const row = await getOrCreate(userId);
-  const stamps = (row.stamps_count || 0) + 1;
-  const rewards = Math.floor(stamps / membership.PASSPORT_STAMPS_PER_REWARD);
-  const justUnlocked = stamps % membership.PASSPORT_STAMPS_PER_REWARD === 0;
-
-  const { data, error } = await supabase
-    .from('passport_progress')
-    .update({
-      stamps_count: stamps,
-      last_stamp_at: new Date().toISOString(),
-      rewards_unlocked: rewards,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('user_id', userId)
-    .select()
-    .single();
-
+  const { data: rpcData, error } = await supabase.rpc('passport_add_stamp', {
+    p_user_id: userId,
+    p_per_reward: membership.PASSPORT_STAMPS_PER_REWARD,
+  });
   if (error) throw new Error(error.message);
+
+  const data = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+  const stamps = data?.stamps_count || 0;
+  const justUnlocked = stamps > 0 && stamps % membership.PASSPORT_STAMPS_PER_REWARD === 0;
 
   let grant = null;
   if (justUnlocked) {
@@ -145,53 +136,21 @@ async function getRedemptionCredits(userId) {
 }
 
 async function consumeRedemptionCredit(userId) {
-  const credits = await getRedemptionCredits(userId);
-  if (credits <= 0) return false;
-  const { error } = await supabase
-    .from('profiles')
-    .update({ passport_redemption_credits: credits - 1 })
-    .eq('id', userId);
+  const { data, error } = await supabase.rpc('passport_consume_credit', { p_user_id: userId });
   if (error) throw new Error(error.message);
-  return true;
+  return data === true;
 }
 
 async function claimGrant(userId, grantId) {
-  const { data: grant, error } = await supabase
-    .from('passport_reward_grants')
-    .select('*')
-    .eq('id', grantId)
-    .eq('user_id', userId)
-    .maybeSingle();
-
+  const { data, error } = await supabase.rpc('passport_claim_grant', {
+    p_user_id: userId,
+    p_grant_id: grantId,
+  });
   if (error) throw new Error(error.message);
-  if (!grant) throw new Error('Reward not found');
-  if (grant.status !== 'available') throw new Error('This reward was already claimed');
-
-  const credits = await getRedemptionCredits(userId);
-  const { error: creditErr } = await supabase
-    .from('profiles')
-    .update({ passport_redemption_credits: credits + 1 })
-    .eq('id', userId);
-  if (creditErr) throw new Error(creditErr.message);
-
-  const { data: updated, error: updErr } = await supabase
-    .from('passport_reward_grants')
-    .update({ status: 'claimed', claimed_at: new Date().toISOString() })
-    .eq('id', grantId)
-    .eq('user_id', userId)
-    .eq('status', 'available')
-    .select()
-    .single();
-
-  if (updErr) {
-    // Roll back credit if claim race lost
-    await supabase.from('profiles').update({ passport_redemption_credits: credits }).eq('id', userId);
-    throw new Error(updErr.message);
-  }
 
   return {
-    grant: updated,
-    passport_redemption_credits: credits + 1,
+    grant: data?.grant,
+    passport_redemption_credits: data?.passport_redemption_credits ?? 0,
     message: 'Bonus redemption credit added to your account.',
   };
 }

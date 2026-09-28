@@ -1,10 +1,10 @@
 const router = require('express').Router();
-const rateLimit = require('express-rate-limit');
+const { createLimiter } = require('../config/rateLimit');
 const { authenticate, optionalAuthenticate } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
 const analyticsController = require('../controllers/analyticsController');
 
-const analyticsLimiter = rateLimit({
+const analyticsLimiter = createLimiter('analytics', {
   windowMs: 15 * 60 * 1000,
   max: 300,
   standardHeaders: true,

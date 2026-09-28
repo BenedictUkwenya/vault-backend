@@ -3,7 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
-const rateLimit = require('express-rate-limit');
+const { createLimiter } = require('./config/rateLimit');
 
 const { errorHandler } = require('./middleware/errorHandler');
 const logger = require('./config/logger');
@@ -71,7 +71,7 @@ app.use(morgan('combined', {
 }));
 
 // ── Rate limiting ─────────────────────────────────────────────────────────────
-const limiter = rateLimit({
+const limiter = createLimiter('api', {
   windowMs: 15 * 60 * 1000, // 15 min
   max: 200,
   standardHeaders: true,
@@ -79,7 +79,7 @@ const limiter = rateLimit({
   // Analytics has its own limiter so event batches don't eat into app API quota.
   skip: (req) => req.path.startsWith('/analytics/'),
 });
-const authLimiter = rateLimit({
+const authLimiter = createLimiter('auth', {
   windowMs: 15 * 60 * 1000,
   max: 20,
   message: { error: 'Too many auth attempts, please try again later.' },

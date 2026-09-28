@@ -1,10 +1,10 @@
 const router = require('express').Router();
-const rateLimit = require('express-rate-limit');
+const { createLimiter } = require('../config/rateLimit');
 const { authenticate, requireAdmin, requireAdminStepUp } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
 const networkController = require('../controllers/networkController');
 
-const applyLimiter = rateLimit({
+const applyLimiter = createLimiter('network-apply', {
   windowMs: 15 * 60 * 1000,
   max: 10,
   message: { error: 'Too many applications from this network. Please try again later.' },

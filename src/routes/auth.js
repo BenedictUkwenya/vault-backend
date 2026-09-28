@@ -1,11 +1,11 @@
 const router = require('express').Router();
-const rateLimit = require('express-rate-limit');
+const { createLimiter } = require('../config/rateLimit');
 const { body } = require('express-validator');
 const { authenticate } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
 const authController = require('../controllers/authController');
 
-const otpLimiter = rateLimit({
+const otpLimiter = createLimiter('otp', {
   windowMs: 15 * 60 * 1000,
   max: 10,
   message: { error: 'Too many attempts. Please try again later.' },
