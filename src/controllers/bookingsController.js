@@ -2,6 +2,9 @@ const supabase = require('../config/supabase');
 const { validationResult } = require('express-validator');
 const { assertSlotBookable } = require('./availabilityController');
 const notificationService = require('../services/notificationService');
+const { todayIn, nowHHMMIn, DEFAULT_TZ } = require('../utils/timezone');
+
+const MAX_PENDING_PER_BUSINESS = 3;
 
 // ── Notification helper ───────────────────────────────────────────────────────
 async function _notify(userId, title, body, type = 'booking', data = {}) {
@@ -34,7 +37,9 @@ async function listForBusiness(req, res) {
     .from('businesses')
     .select('id')
     .eq('owner_id', req.user.id)
-    .single();
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
 
   if (!business) return res.status(403).json({ error: 'No business found' });
 
@@ -42,7 +47,9 @@ async function listForBusiness(req, res) {
     .from('bookings_with_details')
     .select('*')
     .eq('business_id', business.id)
-    .order('preferred_date', { ascending: true });
+    .order('preferred_date', { ascending: true })
+    .order('preferred_time', { ascending: true })
+    .limit(500);
 
   if (error) return res.status(400).json({ error: error.message });
   res.json(data);
@@ -83,6 +90,39 @@ async function create(req, res) {
     typeof preferred_date === 'string' && preferred_date.includes('T')
       ? preferred_date.slice(0, 10)
       : preferred_date;
+
+  const { data: targetBiz } = await supabase
+    .from('businesses')
+    .select('id, owner_id, is_approved')
+    .eq('id', business_id)
+    .maybeSingle();
+  if (!targetBiz || !targetBiz.is_approved) return res.status(404).json({ error: 'Business not found' });
+  if (targetBiz.owner_id === req.user.id) {
+    return res.status(403).json({ error: 'You can’t book your own business.' });
+  }
+
+  if (deal_id) {
+    const { data: deal } = await supabase
+      .from('deals')
+      .select('id')
+      .eq('id', deal_id)
+      .eq('business_id', business_id)
+      .maybeSingle();
+    if (!deal) return res.status(422).json({ error: 'That deal doesn’t belong to this business' });
+  }
+
+  // Stop one member from holding a business's whole calendar with open requests.
+  const { count: openCount } = await supabase
+    .from('bookings')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', req.user.id)
+    .eq('business_id', business_id)
+    .eq('status', 'pending');
+  if ((openCount || 0) >= MAX_PENDING_PER_BUSINESS) {
+    return res.status(429).json({
+      error: `You already have ${MAX_PENDING_PER_BUSINESS} pending requests here. Wait for the business to respond or cancel one.`,
+    });
+  }
 
   const slotCheck = await assertSlotBookable(business_id, dateOnly, preferred_time);
   if (!slotCheck.ok) return res.status(slotCheck.status).json({ error: slotCheck.error });
@@ -131,7 +171,7 @@ async function create(req, res) {
       'New Booking Request 🔔',
       `${req.user.user_metadata?.full_name || req.user.email?.split('@')[0] || 'A member'} requested a booking for "${service_requested}".`,
       'booking',
-      { booking_id: data.id }
+      { booking_id: data.id, audience: 'business' }
     );
   }
 
@@ -162,7 +202,7 @@ async function cancel(req, res) {
       'Booking Cancelled',
       `A member cancelled their booking for "${data.service_requested}" on ${data.preferred_date} at ${data.preferred_time}.`,
       'booking',
-      { booking_id: data.id }
+      { booking_id: data.id, audience: 'business' }
     );
   }
 
@@ -205,10 +245,12 @@ async function approve(req, res) {
       updated_at: new Date().toISOString(),
     })
     .eq('id', req.params.id)
+    .eq('status', 'pending')
     .select()
-    .single();
+    .maybeSingle();
 
   if (error) return res.status(400).json({ error: error.message });
+  if (!data) return res.status(409).json({ error: 'This booking was already updated (maybe cancelled).' });
 
   // Notify the member
   await _notify(
@@ -239,10 +281,12 @@ async function deny(req, res) {
       updated_at: new Date().toISOString(),
     })
     .eq('id', req.params.id)
+    .eq('status', 'pending')
     .select()
-    .single();
+    .maybeSingle();
 
   if (error) return res.status(400).json({ error: error.message });
+  if (!data) return res.status(409).json({ error: 'This booking was already updated (maybe cancelled).' });
 
   // Notify the member
   await _notify(
@@ -259,6 +303,21 @@ async function deny(req, res) {
 async function complete(req, res) {
   const booking = await _requireBusinessOwnership(req, req.params.id);
   if (!booking) return res.status(403).json({ error: 'Unauthorized' });
+
+  // Completing also pays the referrer, so it can't happen before the visit.
+  const { data: slot } = await supabase
+    .from('bookings')
+    .select('preferred_date, preferred_time, businesses(timezone)')
+    .eq('id', req.params.id)
+    .single();
+  if (slot) {
+    const tz = slot.businesses?.timezone || DEFAULT_TZ;
+    const today = todayIn(tz);
+    const slotTime = String(slot.preferred_time || '').slice(0, 5);
+    if (slot.preferred_date > today || (slot.preferred_date === today && slotTime > nowHHMMIn(tz))) {
+      return res.status(400).json({ error: 'You can mark this complete once the appointment time has passed.' });
+    }
+  }
 
   const { data, error } = await supabase
     .from('bookings')

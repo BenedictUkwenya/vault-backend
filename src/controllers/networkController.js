@@ -3,6 +3,8 @@ const crypto = require('crypto');
 const emailService = require('../services/emailService');
 const otpService = require('../services/otpService');
 const logger = require('../config/logger');
+const { findProfileByEmail: findProfileByEmailExact } = require('../utils/emailLookup');
+const { syncEffectiveTier } = require('../services/tierSync');
 
 const VALID_TIERS = ['free', 'student', 'member', 'vip'];
 
@@ -177,12 +179,7 @@ async function updateStatus(req, res) {
 }
 
 async function findProfileByEmail(email) {
-  const { data } = await supabase
-    .from('profiles')
-    .select('id, email, membership_tier, full_name')
-    .ilike('email', email)
-    .maybeSingle();
-  return data || null;
+  return findProfileByEmailExact(email, 'id, email, membership_tier, full_name');
 }
 
 /**
@@ -198,28 +195,19 @@ async function syncProfileAfterInvite(userId, application, preferredTier, { comp
     updated_at: new Date().toISOString(),
   };
 
-  if (comp && preferredTier !== 'free') {
-    patch.membership_tier = preferredTier;
-    patch.membership_expires_at = null;
+  const gift = comp && preferredTier !== 'free';
+  if (gift) {
+    patch.comp_tier = preferredTier;
+    patch.comp_expires_at = null;
+    patch.comp_reason = 'network_invite';
     if (preferredTier === 'student') {
       patch.student_verified_at = new Date().toISOString();
-    }
-  } else {
-    // Do not overwrite an existing paid subscriber
-    const { data: current } = await supabase
-      .from('profiles')
-      .select('membership_tier')
-      .eq('id', userId)
-      .maybeSingle();
-    const currentTier = current?.membership_tier;
-    if (!currentTier || currentTier === 'free' || currentTier === 'paid') {
-      patch.membership_tier = 'free';
-      patch.membership_expires_at = null;
     }
   }
 
   const { error } = await supabase.from('profiles').update(patch).eq('id', userId);
   if (error) throw new Error(error.message);
+  if (gift) await syncEffectiveTier(userId);
 }
 
 /**

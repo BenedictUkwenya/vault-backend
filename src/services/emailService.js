@@ -18,13 +18,22 @@ function getResend() {
   return resendClient;
 }
 
+function esc(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function wrapHtml({ title, bodyHtml }) {
   return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${title}</title>
+  <title>${esc(title)}</title>
 </head>
 <body style="margin:0;padding:0;background:#0a0a0a;font-family:Georgia,'Times New Roman',serif;">
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#0a0a0a;padding:32px 16px;">
@@ -34,7 +43,7 @@ function wrapHtml({ title, bodyHtml }) {
           <tr>
             <td style="padding:28px 28px 12px;text-align:center;">
               <div style="font-size:11px;letter-spacing:0.28em;text-transform:uppercase;color:#d4af37;font-weight:700;">${APP_NAME}</div>
-              <h1 style="margin:14px 0 0;font-size:22px;line-height:1.3;color:#f5f5f5;font-weight:700;">${title}</h1>
+              <h1 style="margin:14px 0 0;font-size:22px;line-height:1.3;color:#f5f5f5;font-weight:700;">${esc(title)}</h1>
             </td>
           </tr>
           <tr>
@@ -120,7 +129,7 @@ async function sendWelcomeEmail(to, fullName) {
   const subject = `Welcome to ${APP_NAME}`;
   const html = wrapHtml({
     title: 'You’re in',
-    bodyHtml: `<p>Hey ${name},</p>
+    bodyHtml: `<p>Hey ${esc(name)},</p>
       <p>Your email is verified and your membership is ready. Open the app to explore deals, and subscribe when you’re ready to unlock paid benefits.</p>
       <p style="margin-top:20px;color:#d4af37;">— The ${APP_NAME} team</p>`,
   });
@@ -164,7 +173,7 @@ async function sendNotificationEmail(to, { title, body }) {
   const subject = `${APP_NAME}: ${title}`;
   const html = wrapHtml({
     title,
-    bodyHtml: `<p>${body}</p><p style="margin-top:18px;font-size:13px;color:rgba(255,255,255,0.5);">Open the app to view details. You can turn off email notifications in Profile settings.</p>`,
+    bodyHtml: `<p>${esc(body)}</p><p style="margin-top:18px;font-size:13px;color:rgba(255,255,255,0.5);">Open the app to view details. You can turn off email notifications in Profile settings.</p>`,
   });
   return sendEmail({
     to,
@@ -178,8 +187,8 @@ async function sendWaitlistJoinedEmail(to, { marketName, city }) {
   const subject = `You're on the ${APP_NAME} waitlist for ${city}`;
   const html = wrapHtml({
     title: "You're on the list",
-    bodyHtml: `<p>You're on the waitlist for <strong>${marketName}</strong>.</p>
-      <p>We'll email you and notify you in the app when we launch in ${city}.</p>`,
+    bodyHtml: `<p>You're on the waitlist for <strong>${esc(marketName)}</strong>.</p>
+      <p>We'll email you and notify you in the app when we launch in ${esc(city)}.</p>`,
   });
   return sendEmail({
     to,
@@ -193,7 +202,7 @@ async function sendMarketLaunchEmail(to, { marketName, city }) {
   const subject = `${APP_NAME}: ${marketName} is now live!`;
   const html = wrapHtml({
     title: `${marketName} is now live!`,
-    bodyHtml: `<p>${APP_NAME} just launched in <strong>${city}</strong>.</p>
+    bodyHtml: `<p>${APP_NAME} just launched in <strong>${esc(city)}</strong>.</p>
       <p>Open the app to explore local deals and partner businesses.</p>
       <p style="margin-top:18px;font-size:13px;color:rgba(255,255,255,0.5);">You're receiving this because you joined a ${APP_NAME} city waitlist.</p>`,
   });
@@ -210,7 +219,7 @@ async function sendNetworkInviteEmail(to, { fullName, code }) {
   const subject = `You’re invited to ${APP_NAME}`;
   const html = wrapHtml({
     title: 'Application approved',
-    bodyHtml: `<p>Hey ${name},</p>
+    bodyHtml: `<p>Hey ${esc(name)},</p>
       <p>Your Network application was approved. Download the Black Limitless app, then use this code to set your password:</p>
       ${codeBlock(code)}
       <p>After you sign in, subscribe in the app to activate your preferred membership plan.</p>`,
@@ -228,7 +237,7 @@ async function sendApplicationReceivedEmail(to, fullName) {
   const subject = `We received your ${APP_NAME} application`;
   const html = wrapHtml({
     title: 'Application received',
-    bodyHtml: `<p>Hey ${name},</p>
+    bodyHtml: `<p>Hey ${esc(name)},</p>
       <p>Thanks for applying. Our team will review your application shortly. If approved, you’ll get an invite to set up the mobile app.</p>
       <p>Membership interest on the form is preference only — you pay for paid plans inside the app after approval.</p>`,
   });
@@ -245,7 +254,16 @@ function generateOtpCode() {
   return String(crypto.randomInt(100000, 999999));
 }
 
+function otpSecret() {
+  return process.env.OTP_HMAC_SECRET || process.env.SUPABASE_SERVICE_KEY || '';
+}
+
+/** Keyed hash: a 6-digit code space is trivially reversible with a plain SHA-256. */
 function hashOtpCode(code) {
+  return crypto.createHmac('sha256', otpSecret()).update(String(code).trim()).digest('hex');
+}
+
+function legacyHashOtpCode(code) {
   return crypto.createHash('sha256').update(String(code).trim()).digest('hex');
 }
 
@@ -263,5 +281,6 @@ module.exports = {
   sendApplicationReceivedEmail,
   generateOtpCode,
   hashOtpCode,
+  legacyHashOtpCode,
   wrapHtml,
 };

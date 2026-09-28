@@ -31,14 +31,12 @@ async function verifyChallenge(adminUser, code) {
   const result = await otpService.verifyOtp(email, PURPOSE, code);
   if (!result.ok) return result;
 
-  // Invalidate prior sessions for this admin
+  // Keep other devices' live sessions (web admin + phone); only prune expired ones.
   await supabase
     .from('admin_action_sessions')
     .delete()
     .eq('admin_user_id', adminUser.id)
-    .lt('expires_at', new Date(Date.now() + SESSION_TTL_MS * 2).toISOString());
-
-  await supabase.from('admin_action_sessions').delete().eq('admin_user_id', adminUser.id);
+    .lt('expires_at', new Date().toISOString());
 
   const token = newSessionToken();
   const expires_at = new Date(Date.now() + SESSION_TTL_MS).toISOString();

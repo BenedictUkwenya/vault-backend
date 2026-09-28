@@ -181,26 +181,34 @@ async function toggleDealFavorite(req, res) {
 }
 
 async function walletHistory(req, res) {
-  const { page = 1, limit = 20 } = req.query;
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20));
   const offset = (page - 1) * limit;
 
   const { data, error, count } = await supabase
     .from('redemptions')
     .select(
-      'id, savings_amount, redeemed_at, deals(title, discount_percentage), businesses(name, logo_url)',
+      'id, deal_id, savings_amount, redeemed_at, verified_at, deals(title, discount_percentage), businesses(name, logo_url, country)',
       { count: 'exact' }
     )
     .eq('user_id', req.user.id)
     .order('redeemed_at', { ascending: false })
-    .range(offset, offset + Number(limit) - 1);
+    .range(offset, offset + limit - 1);
 
   if (error) return res.status(400).json({ error: error.message });
-  res.json({ history: data || [], total: count || 0, page: Number(page) });
+  res.json({ history: data || [], total: count || 0, page });
 }
 
 async function savePushToken(req, res) {
   const { token } = req.body;
   if (!token) return res.status(422).json({ error: 'token required' });
+
+  // One device, one account: a phone that switched users must stop receiving the old user's pushes.
+  await supabase
+    .from('profiles')
+    .update({ push_token: null })
+    .eq('push_token', token)
+    .neq('id', req.user.id);
 
   const { data, error } = await supabase
     .from('profiles')
@@ -211,6 +219,15 @@ async function savePushToken(req, res) {
 
   if (error) return res.status(400).json({ error: error.message });
   res.json(data);
+}
+
+async function clearPushToken(req, res) {
+  const { error } = await supabase
+    .from('profiles')
+    .update({ push_token: null, updated_at: new Date().toISOString() })
+    .eq('id', req.user.id);
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ cleared: true });
 }
 
 async function deleteAccount(req, res) {
@@ -291,6 +308,7 @@ module.exports = {
   toggleDealFavorite,
   walletHistory,
   savePushToken,
+  clearPushToken,
   deleteAccount,
   bumpStreak,
 };

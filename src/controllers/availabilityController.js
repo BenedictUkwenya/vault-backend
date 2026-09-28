@@ -1,13 +1,18 @@
 const supabase = require('../config/supabase');
+const { todayIn, nowHHMMIn, DEFAULT_TZ } = require('../utils/timezone');
 
-function todayIsoLocal() {
-  const n = new Date();
-  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
+const MAX_RANGE_DAYS = 92;
+
+/** Slot times are wall-clock times at the business, so "today"/"now" must be too. */
+async function businessTimezone(businessId) {
+  const { data } = await supabase.from('businesses').select('timezone').eq('id', businessId).maybeSingle();
+  return data?.timezone || DEFAULT_TZ;
 }
 
-function nowHHMM() {
-  const n = new Date();
-  return `${String(n.getHours()).padStart(2, '0')}:${String(n.getMinutes()).padStart(2, '0')}`;
+function addDaysIso(iso, days) {
+  const [y, m, d] = iso.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + days));
+  return dt.toISOString().slice(0, 10);
 }
 
 function weekdayOfIsoDate(isoDate) {
@@ -44,14 +49,17 @@ function normalizeTime(t) {
 async function _ownerBusiness(userId) {
   const { data } = await supabase
     .from('businesses')
-    .select('id, name')
+    .select('id, name, timezone')
     .eq('owner_id', userId)
+    .order('created_at', { ascending: true })
+    .limit(1)
     .maybeSingle();
   return data;
 }
 
 /** Build free-slot calendar for a business between from/to (inclusive YYYY-MM-DD). */
-async function computeFreeDays(businessId, from, to) {
+async function computeFreeDays(businessId, from, to, tz) {
+  const zone = tz || (await businessTimezone(businessId));
   const [{ data: template }, { data: blocks }, { data: held }] = await Promise.all([
     supabase
       .from('business_availability')
@@ -96,8 +104,8 @@ async function computeFreeDays(businessId, from, to) {
     (held || []).map((b) => `${b.preferred_date}|${normalizeTime(b.preferred_time) || b.preferred_time}`)
   );
 
-  const today = todayIsoLocal();
-  const now = nowHHMM();
+  const today = todayIn(zone);
+  const now = nowHHMMIn(zone);
   const days = [];
 
   for (const date of eachDateInclusive(from, to)) {
@@ -131,28 +139,26 @@ async function computeFreeDays(businessId, from, to) {
 
 async function getPublicAvailability(req, res) {
   const businessId = req.params.id;
-  const today = todayIsoLocal();
-  let from = req.query.from || today;
-  let to = req.query.to;
-
-  if (!to) {
-    const [y, m, d] = from.split('-').map(Number);
-    const end = new Date(y, m - 1, d);
-    end.setDate(end.getDate() + 92);
-    to = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`;
-  }
-
-  if (from < today) from = today;
+  const isoDate = /^\d{4}-\d{2}-\d{2}$/;
 
   const { data: business } = await supabase
     .from('businesses')
-    .select('id')
+    .select('id, is_approved, timezone')
     .eq('id', businessId)
     .maybeSingle();
 
-  if (!business) return res.status(404).json({ error: 'Business not found' });
+  if (!business || !business.is_approved) return res.status(404).json({ error: 'Business not found' });
 
-  const result = await computeFreeDays(businessId, from, to);
+  const tz = business.timezone || DEFAULT_TZ;
+  const today = todayIn(tz);
+  let from = isoDate.test(String(req.query.from || '')) ? req.query.from : today;
+  if (from < today) from = today;
+  const maxTo = addDaysIso(from, MAX_RANGE_DAYS);
+  let to = isoDate.test(String(req.query.to || '')) ? req.query.to : maxTo;
+  if (to > maxTo) to = maxTo;
+  if (to < from) to = from;
+
+  const result = await computeFreeDays(businessId, from, to, tz);
   res.json(result);
 }
 
@@ -160,7 +166,7 @@ async function getMyAvailability(req, res) {
   const business = await _ownerBusiness(req.user.id);
   if (!business) return res.status(403).json({ error: 'No business found' });
 
-  const today = todayIsoLocal();
+  const today = todayIn(business.timezone || DEFAULT_TZ);
   const [{ data: slots, error }, { data: blocks }] = await Promise.all([
     supabase
       .from('business_availability')
@@ -242,7 +248,7 @@ async function putMyAvailability(req, res) {
 }
 
 async function getMyAvailabilityPayload(businessId) {
-  const today = todayIsoLocal();
+  const today = todayIn(await businessTimezone(businessId));
   const [{ data: slots }, { data: blocks }] = await Promise.all([
     supabase
       .from('business_availability')
@@ -379,11 +385,15 @@ async function assertSlotBookable(businessId, preferred_date, preferred_time) {
     return { ok: false, status: 422, error: 'preferred_date must be YYYY-MM-DD' };
   }
 
-  const today = todayIsoLocal();
+  const tz = await businessTimezone(businessId);
+  const today = todayIn(tz);
   if (preferred_date < today) {
     return { ok: false, status: 400, error: 'Cannot book a past date' };
   }
-  if (preferred_date === today && time <= nowHHMM()) {
+  if (preferred_date > addDaysIso(today, MAX_RANGE_DAYS)) {
+    return { ok: false, status: 400, error: 'That date is too far ahead to book' };
+  }
+  if (preferred_date === today && time <= nowHHMMIn(tz)) {
     return { ok: false, status: 400, error: 'Cannot book a past time' };
   }
 

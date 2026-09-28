@@ -4,6 +4,7 @@ const logger = require('../config/logger');
 const referralService = require('../services/referralService');
 const membership = require('../services/membershipService');
 const notificationService = require('../services/notificationService');
+const { syncEffectiveTier } = require('../services/tierSync');
 
 async function webhook(req, res) {
   const sig = req.headers['stripe-signature'];
@@ -50,27 +51,47 @@ async function webhook(req, res) {
   res.json({ received: true });
 }
 
+/** Supabase returns errors instead of throwing; throw so Stripe gets a 500 and retries. */
+function must(result, what) {
+  if (result?.error) throw new Error(`${what}: ${result.error.message}`);
+  return result;
+}
+
+/**
+ * The tier comes from the price actually paid. Metadata is client-influenced at
+ * checkout time, so it may only ever lower the tier, never raise it to VIP.
+ */
 function resolveSubMeta(sub) {
   const metaType = sub.metadata?.subscriptionType || sub.metadata?.subscription_type;
   const priceId = sub.items?.data?.[0]?.price?.id;
   const fromPrice = membership.tierFromPriceId(priceId);
-  const isBusiness = metaType === 'business' || priceId === process.env.STRIPE_BUSINESS_PRICE_ID;
-  const memberTier = isBusiness
-    ? null
-    : membership.tierFromCheckoutType(metaType) || fromPrice || 'member';
-  return { isBusiness, memberTier, priceId, metaType: metaType || (isBusiness ? 'business' : 'member') };
+  const isBusiness = priceId
+    ? priceId === process.env.STRIPE_BUSINESS_PRICE_ID
+    : metaType === 'business';
+  let memberTier = null;
+  if (!isBusiness) {
+    memberTier = fromPrice || (metaType === 'student' ? 'student' : 'member');
+    if (memberTier === 'vip' && !fromPrice) memberTier = 'member';
+  }
+  return { isBusiness, memberTier, priceId, metaType: isBusiness ? 'business' : memberTier };
+}
+
+// past_due keeps access during Stripe's retry window instead of dropping to Free
+// on the first failed charge.
+function subscriptionGrantsAccess(status) {
+  return status === 'active' || status === 'trialing' || status === 'past_due';
 }
 
 async function handleSubscriptionUpsert(sub) {
   const customerId = sub.customer;
-  const isActive = sub.status === 'active' || sub.status === 'trialing';
-  const { isBusiness, memberTier, metaType } = resolveSubMeta(sub);
+  const isActive = subscriptionGrantsAccess(sub.status);
+  const { isBusiness, metaType } = resolveSubMeta(sub);
 
   const { data: profile } = await supabase
     .from('profiles')
     .select('id')
     .eq('stripe_customer_id', customerId)
-    .single();
+    .maybeSingle();
 
   if (!profile) {
     logger.warn('No profile found for Stripe customer', { customerId });
@@ -82,40 +103,42 @@ async function handleSubscriptionUpsert(sub) {
       ? new Date(sub.current_period_end * 1000).toISOString()
       : null;
 
-  if (isBusiness) {
-    await supabase
-      .from('businesses')
-      .update({
-        subscription_status: isActive ? 'active' : 'none',
-        subscription_expires_at: expiresAt,
+  must(
+    await supabase.from('subscriptions').upsert(
+      {
+        user_id: profile.id,
+        stripe_subscription_id: sub.id,
+        stripe_customer_id: customerId,
+        status: sub.status,
+        subscription_type: metaType,
+        current_period_start: new Date(sub.current_period_start * 1000).toISOString(),
+        current_period_end: new Date(sub.current_period_end * 1000).toISOString(),
+        cancel_at_period_end: sub.cancel_at_period_end,
         updated_at: new Date().toISOString(),
-      })
-      .eq('owner_id', profile.id);
-  } else {
-    await supabase
-      .from('profiles')
-      .update({
-        membership_tier: isActive ? memberTier : 'free',
-        membership_expires_at: expiresAt,
-        ...(isActive ? { preferred_membership_tier: null } : {}),
-      })
-      .eq('id', profile.id);
-  }
-
-  await supabase.from('subscriptions').upsert(
-    {
-      user_id: profile.id,
-      stripe_subscription_id: sub.id,
-      stripe_customer_id: customerId,
-      status: sub.status,
-      subscription_type: metaType,
-      current_period_start: new Date(sub.current_period_start * 1000).toISOString(),
-      current_period_end: new Date(sub.current_period_end * 1000).toISOString(),
-      cancel_at_period_end: sub.cancel_at_period_end,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: 'stripe_subscription_id' }
+      },
+      { onConflict: 'stripe_subscription_id' }
+    ),
+    'upsert subscription'
   );
+
+  if (isBusiness) {
+    must(
+      await supabase
+        .from('businesses')
+        .update({
+          subscription_status: isActive ? 'active' : 'none',
+          subscription_expires_at: expiresAt,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('owner_id', profile.id),
+      'update business subscription'
+    );
+  } else {
+    await syncEffectiveTier(profile.id);
+    if (isActive) {
+      await supabase.from('profiles').update({ preferred_membership_tier: null }).eq('id', profile.id);
+    }
+  }
 
   if (isActive && !isBusiness) {
     await referralService.recordReferralEvent(profile.id, 'subscribe');
@@ -130,33 +153,34 @@ async function handleSubscriptionDeleted(sub) {
     .from('profiles')
     .select('id')
     .eq('stripe_customer_id', customerId)
-    .single();
+    .maybeSingle();
 
   if (!profile) return;
 
-  if (isBusiness) {
+  must(
     await supabase
-      .from('businesses')
-      .update({
-        subscription_status: 'none',
-        subscription_expires_at: null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('owner_id', profile.id);
-  } else {
-    await supabase
-      .from('profiles')
-      .update({
-        membership_tier: 'free',
-        membership_expires_at: null,
-      })
-      .eq('id', profile.id);
-  }
+      .from('subscriptions')
+      .update({ status: 'canceled', updated_at: new Date().toISOString() })
+      .eq('stripe_subscription_id', sub.id),
+    'mark subscription canceled'
+  );
 
-  await supabase
-    .from('subscriptions')
-    .update({ status: 'canceled', updated_at: new Date().toISOString() })
-    .eq('stripe_subscription_id', sub.id);
+  if (isBusiness) {
+    must(
+      await supabase
+        .from('businesses')
+        .update({
+          subscription_status: 'none',
+          subscription_expires_at: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('owner_id', profile.id),
+      'clear business subscription'
+    );
+  } else {
+    // Another live subscription or a complimentary grant may still apply.
+    await syncEffectiveTier(profile.id);
+  }
 }
 
 async function handlePaymentSucceeded(invoice) {

@@ -17,6 +17,7 @@ router.get(
   authenticate,
   asyncHandler(dealsController.getMyRedemption)
 );
+router.get('/:id/mine', authenticate, requireBusiness, asyncHandler(dealsController.getMine));
 router.get('/:id', asyncHandler(dealsController.getById));
 
 // Auth required
@@ -34,7 +35,9 @@ router.post(
   requireBusiness,
   [
     body('title').trim().notEmpty(),
-    body('discount_percentage').isInt({ min: 25 }),
+    body('discount_percentage')
+      .isInt({ min: 25, max: 100 })
+      .withMessage('Discount must be a whole number from 25 to 100.'),
   ],
   asyncHandler(dealsController.create)
 );

@@ -2,6 +2,13 @@ const supabase = require('../config/supabase');
 const { ensureBusinessRole } = require('../utils/ensureBusinessRole');
 const membership = require('../services/membershipService');
 const notificationService = require('../services/notificationService');
+const { timezoneForCountry } = require('../utils/timezone');
+
+/** Votes are keyed to the UTC month, matching the business_votes.vote_month unique index. */
+function monthStartUtc() {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+}
 
 async function listCategories(req, res) {
   const { data, error } = await supabase
@@ -27,14 +34,17 @@ async function scanMember(req, res) {
   const isValid =
     membership.isMembershipActive(profile) || profile.membership_tier === 'free';
 
-  // Look up the scanning business name for the notification
   const { data: business } = await supabase
     .from('businesses')
-    .select('name')
+    .select('name, is_approved')
     .eq('owner_id', req.user.id)
-    .single();
+    .limit(1)
+    .maybeSingle();
+  if (!business?.is_approved) {
+    return res.status(403).json({ error: 'Only approved businesses can scan member cards' });
+  }
 
-  const businessName = business?.name || 'a business';
+  const businessName = business.name;
 
   // Notify the scanned member their card was checked
   try {
@@ -52,7 +62,6 @@ async function scanMember(req, res) {
     full_name: profile.full_name,
     membership_tier: membership.normalizeTier(profile.membership_tier),
     membership_expires_at: profile.membership_expires_at,
-    referral_code: profile.referral_code,
     avatar_url: profile.avatar_url,
     is_valid: isValid,
     is_paid: membership.isMembershipActive(profile),
@@ -104,6 +113,13 @@ async function getById(req, res) {
     .single();
 
   if (error || !data) return res.status(404).json({ error: 'Business not found' });
+
+  const isOwnerOrAdmin =
+    (req.user?.id && req.user.id === data.owner_id) ||
+    ['admin', 'super_admin'].includes(req.profile?.role);
+  if (!data.is_approved && !isOwnerOrAdmin) {
+    return res.status(404).json({ error: 'Business not found' });
+  }
 
   // Views are recorded separately on screen focus (POST /:id/view)
   res.json(data);
@@ -201,7 +217,8 @@ async function register(req, res) {
     .from('businesses')
     .select('id')
     .eq('owner_id', req.user.id)
-    .single();
+    .limit(1)
+    .maybeSingle();
 
   if (existing.data) {
     return res.status(409).json({ error: 'You already have a registered business' });
@@ -248,11 +265,16 @@ async function register(req, res) {
       twitter_handle: twitter_handle || null,
       latitude: latitude != null ? Number(latitude) : null,
       longitude: longitude != null ? Number(longitude) : null,
+      timezone: timezoneForCountry(country),
       is_approved: false,
+      review_status: 'pending',
     })
     .select()
     .single();
 
+  if (error?.code === '23505') {
+    return res.status(409).json({ error: 'You already have a registered business' });
+  }
   if (error) return res.status(400).json({ error: error.message });
 
   await ensureBusinessRole(req.user.id);
@@ -265,7 +287,9 @@ async function getMy(req, res) {
     .from('businesses_with_stats')
     .select('*')
     .eq('owner_id', req.user.id)
-    .single();
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
 
   if (error || !data) return res.status(404).json({ error: 'Business not found' });
 
@@ -310,44 +334,60 @@ async function updateMy(req, res) {
   if (updates.images !== undefined && !Array.isArray(updates.images)) {
     return res.status(400).json({ error: 'images must be an array of URLs' });
   }
+  if (updates.country !== undefined) updates.timezone = timezoneForCountry(updates.country);
+
+  const { data: current } = await supabase
+    .from('businesses')
+    .select('id, review_status')
+    .eq('owner_id', req.user.id)
+    .limit(1)
+    .maybeSingle();
+  if (!current) return res.status(404).json({ error: 'Business not found' });
+
+  // Editing after a rejection resubmits the application for review.
+  const resubmitted = current.review_status === 'rejected' && req.body.resubmit !== false;
+  if (resubmitted) updates.review_status = 'pending';
 
   const { data, error } = await supabase
     .from('businesses')
     .update({ ...updates, updated_at: new Date().toISOString() })
-    .eq('owner_id', req.user.id)
+    .eq('id', current.id)
     .select()
     .single();
 
   if (error) return res.status(400).json({ error: error.message });
-  res.json(data);
+  res.json({ ...data, resubmitted });
 }
 
 async function getAnalytics(req, res) {
   const { data: business } = await supabase
     .from('businesses')
-    .select('id, rating_avg')
+    .select('id, rating_avg, timezone')
     .eq('owner_id', req.user.id)
-    .single();
+    .limit(1)
+    .maybeSingle();
 
   if (!business) return res.status(404).json({ error: 'Business not found' });
 
-  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const tz = business.timezone || 'America/New_York';
+  const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
-  const [redemptions7d, redemptions30d, bookings30d, views] = await Promise.all([
+  // Only scans staff actually verified count; generated-but-unused QR codes don't.
+  const [redemptions7d, redemptions30d, bookings30d, views, ratingCount] = await Promise.all([
     supabase
       .from('redemptions')
-      .select('redeemed_at')
+      .select('verified_at')
       .eq('business_id', business.id)
-      .gte('redeemed_at', sevenDaysAgo),
+      .gte('verified_at', eightDaysAgo),
     supabase
       .from('redemptions')
-      .select('redeemed_at')
+      .select('id', { count: 'exact', head: true })
       .eq('business_id', business.id)
-      .gte('redeemed_at', thirtyDaysAgo),
+      .gte('verified_at', thirtyDaysAgo),
     supabase
       .from('bookings')
-      .select('created_at, status')
+      .select('id', { count: 'exact', head: true })
       .eq('business_id', business.id)
       .gte('created_at', thirtyDaysAgo),
     supabase
@@ -355,29 +395,36 @@ async function getAnalytics(req, res) {
       .select('total_views')
       .eq('id', business.id)
       .single(),
+    supabase
+      .from('business_ratings')
+      .select('id', { count: 'exact', head: true })
+      .eq('business_id', business.id),
   ]);
 
-  // Build a 7-element array: index 0 = 6 days ago ... index 6 = today
+  // 7 calendar days in the business's timezone: index 0 = 6 days ago ... 6 = today
+  const dayKey = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(d);
+  const keys = [];
+  for (let i = 6; i >= 0; i -= 1) keys.push(dayKey(new Date(Date.now() - i * 24 * 60 * 60 * 1000)));
   const dailyCounts = Array(7).fill(0);
-  const now = new Date();
-  for (const row of (redemptions7d.data || [])) {
-    const daysAgo = Math.floor((now - new Date(row.redeemed_at)) / (24 * 60 * 60 * 1000));
-    const idx = 6 - daysAgo;
-    if (idx >= 0 && idx < 7) dailyCounts[idx]++;
+  for (const row of redemptions7d.data || []) {
+    const idx = keys.indexOf(dayKey(new Date(row.verified_at)));
+    if (idx >= 0) dailyCounts[idx] += 1;
   }
 
   res.json({
-    redemptions_30d: redemptions30d.data?.length || 0,
-    bookings_30d: bookings30d.data?.length || 0,
+    redemptions_30d: redemptions30d.count || 0,
+    bookings_30d: bookings30d.count || 0,
     total_views: views.data?.total_views || 0,
     rating: business.rating_avg || 0,
+    rating_count: ratingCount.count || 0,
     redemptions_7d: dailyCounts,
+    redemptions_7d_labels: keys,
   });
 }
 
 async function vote(req, res) {
   const { id } = req.params;
-  const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+  const monthStart = monthStartUtc();
 
   // One vote per user per calendar month (any business).
   const { data: existing } = await supabase
@@ -401,38 +448,48 @@ async function vote(req, res) {
     .from('business_votes')
     .insert({ business_id: id, user_id: req.user.id });
 
+  if (error?.code === '23505') return res.status(409).json({ error: 'You already voted this month' });
   if (error) return res.status(400).json({ error: error.message });
   res.json({ voted: true });
 }
 
 async function voteResults(req, res) {
-  const start = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
-  const { data, error } = await supabase
-    .from('business_votes')
-    .select('business_id, businesses(name, logo_url, is_founding_member, founding_member_number)')
-    .gte('created_at', start);
-
-  if (error) return res.status(400).json({ error: error.message });
+  const start = monthStartUtc();
+  const PAGE = 1000;
+  let rows = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from('business_votes')
+      .select('business_id, businesses(name, logo_url, is_founding_member, founding_member_number)')
+      .gte('created_at', start)
+      .order('id')
+      .range(from, from + PAGE - 1);
+    if (error) return res.status(400).json({ error: error.message });
+    rows = rows.concat(data || []);
+    if (!data || data.length < PAGE) break;
+  }
 
   const counts = {};
-  for (const row of data || []) {
+  for (const row of rows) {
     if (!counts[row.business_id]) {
       counts[row.business_id] = { business_id: row.business_id, ...row.businesses, votes: 0 };
     }
     counts[row.business_id].votes++;
   }
 
-  const results = Object.values(counts).sort((a, b) => b.votes - a.votes).slice(0, 10);
+  const results = Object.values(counts).sort((a, b) => b.votes - a.votes);
   res.json(results);
 }
 
 async function myVote(req, res) {
-  const start = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+  const start = monthStartUtc();
   const { data } = await supabase
     .from('business_votes')
     .select('business_id, created_at, businesses(name, logo_url, is_founding_member, founding_member_number)')
     .eq('user_id', req.user.id)
     .gte('created_at', start)
+    .order('created_at', { ascending: false })
+    .limit(1)
     .maybeSingle();
 
   res.json({ voted: !!data, vote: data || null });

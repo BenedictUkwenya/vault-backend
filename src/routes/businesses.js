@@ -1,6 +1,6 @@
 const router = require('express').Router();
 const { body } = require('express-validator');
-const { authenticate, requireBusiness } = require('../middleware/auth');
+const { authenticate, optionalAuthenticate, requireBusiness } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
 const businessesController = require('../controllers/businessesController');
 const availabilityController = require('../controllers/availabilityController');
@@ -45,7 +45,7 @@ router.post(
 // Public by id
 router.get('/:id/availability', asyncHandler(availabilityController.getPublicAvailability));
 router.get('/:id/posts', asyncHandler(businessesController.listPosts));
-router.get('/:id', asyncHandler(businessesController.getById));
+router.get('/:id', optionalAuthenticate, asyncHandler(businessesController.getById));
 router.post('/:id/view', asyncHandler(businessesController.recordView));
 router.get('/:id/rating/me', authenticate, asyncHandler(businessesController.myBusinessRating));
 router.post(

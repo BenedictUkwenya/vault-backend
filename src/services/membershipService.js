@@ -132,12 +132,16 @@ function redemptionLimitForTier(tier) {
   return Object.prototype.hasOwnProperty.call(REDEMPTION_LIMITS, t) ? REDEMPTION_LIMITS[t] : 1;
 }
 
+/**
+ * No cross-plan fallbacks: charging the Member price for a "vip" checkout would
+ * grant VIP for $11.11. An unconfigured plan must fail loudly instead.
+ */
 function priceIdForCheckoutType(type) {
   switch (type) {
     case 'student':
-      return process.env.STRIPE_STUDENT_PRICE_ID || process.env.STRIPE_MEMBER_PRICE_ID;
+      return process.env.STRIPE_STUDENT_PRICE_ID || null;
     case 'vip':
-      return process.env.STRIPE_VIP_PRICE_ID || process.env.STRIPE_MEMBER_PRICE_ID;
+      return process.env.STRIPE_VIP_PRICE_ID || null;
     case 'business':
       return process.env.STRIPE_BUSINESS_PRICE_ID;
     case 'member':

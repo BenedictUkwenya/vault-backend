@@ -20,6 +20,7 @@ router.get('/deal-favorites/:dealId/status', authenticate, asyncHandler(usersCon
 router.post('/deal-favorites/:dealId', authenticate, asyncHandler(usersController.toggleDealFavorite));
 router.get('/wallet/history', authenticate, asyncHandler(usersController.walletHistory));
 router.post('/push-token', authenticate, asyncHandler(usersController.savePushToken));
+router.delete('/push-token', authenticate, asyncHandler(usersController.clearPushToken));
 router.post('/streak', authenticate, asyncHandler(usersController.bumpStreak));
 router.delete('/account', authenticate, asyncHandler(usersController.deleteAccount));
 

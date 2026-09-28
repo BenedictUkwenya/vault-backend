@@ -1,6 +1,8 @@
 const supabase = require('../config/supabase');
 const referralService = require('../services/referralService');
 
+const APPLY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
 async function getStats(req, res) {
   const { data: profile } = await supabase
     .from('profiles')
@@ -46,6 +48,16 @@ async function getStats(req, res) {
 async function applyCode(req, res) {
   const { code } = req.body;
   if (!code) return res.status(422).json({ error: 'Referral code required' });
+
+  const { data: me } = await supabase
+    .from('profiles')
+    .select('created_at')
+    .eq('id', req.user.id)
+    .maybeSingle();
+  const ageMs = me?.created_at ? Date.now() - new Date(me.created_at).getTime() : 0;
+  if (ageMs > APPLY_WINDOW_MS) {
+    return res.status(400).json({ error: 'Referral codes can only be applied to new accounts' });
+  }
 
   const result = await referralService.applyReferral(req.user.id, code);
   if (result.error) return res.status(400).json({ error: result.error });

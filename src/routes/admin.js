@@ -1,4 +1,5 @@
 const router = require('express').Router();
+const rateLimit = require('express-rate-limit');
 const { authenticate, requireAdmin, requireAdminStepUp } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
 const adminController = require('../controllers/adminController');
@@ -6,9 +7,20 @@ const locationsController = require('../controllers/locationsController');
 
 router.use(authenticate, requireAdmin);
 
+// Per-admin limits on the email-code step: each new challenge resets the attempt
+// counter, so code requests themselves have to be capped.
+const stepUpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => `stepup:${req.user?.id || req.ip}`,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many verification attempts. Wait 15 minutes and try again.' },
+});
+
 // Step-up unlock (no action-token required)
-router.post('/security/challenge', asyncHandler(adminController.securityChallenge));
-router.post('/security/verify', asyncHandler(adminController.securityVerify));
+router.post('/security/challenge', stepUpLimiter, asyncHandler(adminController.securityChallenge));
+router.post('/security/verify', stepUpLimiter, asyncHandler(adminController.securityVerify));
 router.get('/security/status', asyncHandler(adminController.securityStatus));
 router.post('/security/logout', asyncHandler(adminController.securityLogout));
 

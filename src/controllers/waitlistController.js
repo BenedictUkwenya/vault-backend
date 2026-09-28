@@ -2,6 +2,7 @@ const supabase = require('../config/supabase');
 const marketsService = require('../services/marketsService');
 const emailService = require('../services/emailService');
 const logger = require('../config/logger');
+const { literalIlikePattern } = require('../utils/emailLookup');
 
 async function join(req, res) {
   const { email: bodyEmail, city, market_id } = req.body;
@@ -84,7 +85,7 @@ async function myStatus(req, res) {
       .from('waitlist')
       .select('id, created_at')
       .eq('market_id', statusInfo.market.id)
-      .ilike('email', req.user.email.toLowerCase())
+      .ilike('email', literalIlikePattern(req.user.email.toLowerCase()))
       .maybeSingle();
     onWaitlist = !!data;
   }

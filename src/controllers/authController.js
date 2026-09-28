@@ -4,16 +4,7 @@ const referralService = require('../services/referralService');
 const emailService = require('../services/emailService');
 const otpService = require('../services/otpService');
 const logger = require('../config/logger');
-
-async function findAuthUserIdByEmail(email) {
-  const emailNorm = String(email || '').trim().toLowerCase();
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('id, email')
-    .ilike('email', emailNorm)
-    .maybeSingle();
-  return profile?.id || null;
-}
+const { findProfileIdByEmail: findAuthUserIdByEmail } = require('../utils/emailLookup');
 
 async function register(req, res) {
   const errors = validationResult(req);
@@ -116,9 +107,11 @@ async function verifyEmail(req, res) {
     password,
   });
   if (signInErr) {
-    return res.status(400).json({
-      error: signInErr.message,
+    // The code is already consumed and the email confirmed, so this is a success
+    // the client should route to login rather than an error to retry.
+    return res.json({
       verified: true,
+      needs_login: true,
       message: 'Email verified. Please sign in with your password.',
     });
   }

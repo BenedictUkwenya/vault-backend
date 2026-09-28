@@ -9,16 +9,25 @@ async function getPlans(_req, res) {
   });
 }
 
+/** Matches the redeem cap: verified this month plus unexpired (48h) unscanned QR codes. */
 async function countVerifiedThisMonth(userId) {
   const { start, end } = membership.monthWindow();
-  const { count } = await supabase
-    .from('redemptions')
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', userId)
-    .not('verified_at', 'is', null)
-    .gte('verified_at', start)
-    .lt('verified_at', end);
-  return count || 0;
+  const pendingCutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+  const [verified, pending] = await Promise.all([
+    supabase
+      .from('redemptions')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .gte('verified_at', start)
+      .lt('verified_at', end),
+    supabase
+      .from('redemptions')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .is('verified_at', null)
+      .gte('redeemed_at', pendingCutoff),
+  ]);
+  return (verified.count || 0) + (pending.count || 0);
 }
 
 async function getStatus(req, res) {
@@ -57,9 +66,33 @@ async function getStatus(req, res) {
   });
 }
 
+/** Only redirect back to our own web app or the mobile app's deep-link schemes. */
+function safeReturnUrl(url, fallback) {
+  if (!url || typeof url !== 'string') return fallback;
+  const allowed = [process.env.FRONTEND_URL, 'blacklimitless://', 'exp://', 'exps://'].filter(Boolean);
+  return allowed.some((prefix) => url.startsWith(prefix)) ? url : fallback;
+}
+
 async function createCheckout(req, res) {
-  const { price_id, success_url, cancel_url, type = 'member' } = req.body;
+  const { success_url, cancel_url, type = 'member' } = req.body;
   const checkoutType = type === 'paid' ? 'member' : type;
+  if (!['student', 'member', 'vip', 'business'].includes(checkoutType)) {
+    return res.status(422).json({ error: 'Unknown plan' });
+  }
+
+  const { data: activeSub } = await supabase
+    .from('subscriptions')
+    .select('id, subscription_type')
+    .eq('user_id', req.user.id)
+    .in('status', ['active', 'trialing', 'past_due'])
+    .limit(1)
+    .maybeSingle();
+  if (activeSub && (checkoutType === 'business') === (activeSub.subscription_type === 'business')) {
+    return res.status(409).json({
+      error: 'You already have an active subscription. Use Manage billing to change plans.',
+      use_portal: true,
+    });
+  }
 
   const { data: profile } = await supabase
     .from('profiles')
@@ -73,7 +106,9 @@ async function createCheckout(req, res) {
     profile?.stripe_customer_id
   );
 
-  const priceId = price_id || membership.priceIdForCheckoutType(checkoutType);
+  // The price is always chosen server-side; a client-supplied price_id could pair a
+  // cheap price with an expensive plan type.
+  const priceId = membership.priceIdForCheckoutType(checkoutType);
   if (!priceId) {
     return res.status(400).json({
       error: `Stripe price not configured for plan "${checkoutType}". Set the matching STRIPE_*_PRICE_ID env var.`,
@@ -83,8 +118,8 @@ async function createCheckout(req, res) {
   const session = await stripeService.createCheckoutSession({
     customerId,
     priceId,
-    successUrl: success_url || `${process.env.FRONTEND_URL}/membership?success=true`,
-    cancelUrl: cancel_url || `${process.env.FRONTEND_URL}/membership?canceled=true`,
+    successUrl: safeReturnUrl(success_url, `${process.env.FRONTEND_URL}/membership?success=true`),
+    cancelUrl: safeReturnUrl(cancel_url, `${process.env.FRONTEND_URL}/membership?canceled=true`),
     userId: req.user.id,
     subscriptionType: checkoutType,
   });
@@ -105,7 +140,7 @@ async function createPortalSession(req, res) {
 
   const session = await stripeService.createPortalSession(
     profile.stripe_customer_id,
-    req.body.return_url || `${process.env.FRONTEND_URL}/membership`
+    safeReturnUrl(req.body.return_url, `${process.env.FRONTEND_URL}/membership`)
   );
 
   res.json({ portal_url: session.url });

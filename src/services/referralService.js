@@ -133,25 +133,31 @@ async function applyReferral(newUserId, code) {
 async function awardFreeMonth(userId) {
   const { data: profile } = await supabase
     .from('profiles')
-    .select('membership_expires_at, membership_tier')
+    .select('comp_tier, comp_expires_at')
     .eq('id', userId)
     .single();
 
-  const baseDate =
-    profile?.membership_expires_at && new Date(profile.membership_expires_at) > new Date()
-      ? new Date(profile.membership_expires_at)
-      : new Date();
+  // Stack on an existing complimentary period; never lower an existing comp tier.
+  const compActive =
+    profile?.comp_tier && (!profile.comp_expires_at || new Date(profile.comp_expires_at) > new Date());
+  if (compActive && !profile.comp_expires_at) return; // lifetime comp already
 
+  const baseDate = compActive ? new Date(profile.comp_expires_at) : new Date();
   const newExpiry = new Date(baseDate);
   newExpiry.setMonth(newExpiry.getMonth() + 1);
+  const { TIER_RANK, syncEffectiveTier } = require('./tierSync');
+  const compTier =
+    compActive && (TIER_RANK[profile.comp_tier] || 0) > TIER_RANK.member ? profile.comp_tier : 'member';
 
   await supabase
     .from('profiles')
     .update({
-      membership_tier: 'member',
-      membership_expires_at: newExpiry.toISOString(),
+      comp_tier: compTier,
+      comp_expires_at: newExpiry.toISOString(),
+      comp_reason: 'referral_free_month',
     })
     .eq('id', userId);
+  await syncEffectiveTier(userId);
 
   try {
     const notificationService = require('./notificationService');
@@ -204,13 +210,14 @@ async function recordReferralEvent(referredUserId, eventKey) {
       .update({ status: 'completed', completed_at: new Date().toISOString() })
       .eq('id', referral.id);
 
-    const { data: referrer } = await supabase
-      .from('profiles')
-      .select('referral_count')
-      .eq('id', referral.referrer_id)
-      .single();
+    // Derive the count from completed referrals so concurrent completions can't lose an increment.
+    const { count: completedCount } = await supabase
+      .from('referrals')
+      .select('id', { count: 'exact', head: true })
+      .eq('referrer_id', referral.referrer_id)
+      .eq('status', 'completed');
 
-    const newCount = (referrer?.referral_count || 0) + 1;
+    const newCount = completedCount || 0;
     await supabase
       .from('profiles')
       .update({ referral_count: newCount })

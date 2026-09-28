@@ -1,5 +1,6 @@
 const marketsService = require('../services/marketsService');
 const supabase = require('../config/supabase');
+const { literalIlikePattern } = require('../utils/emailLookup');
 
 async function list(req, res) {
   try {
@@ -23,7 +24,7 @@ async function status(req, res) {
       .from('waitlist')
       .select('id')
       .eq('market_id', statusInfo.market.id)
-      .ilike('email', email)
+      .ilike('email', literalIlikePattern(email))
       .maybeSingle();
     onWaitlist = !!data;
   }

@@ -74,19 +74,30 @@ async function verifyOtp(email, purpose, code) {
     return { ok: false, error: 'Too many attempts. Request a new code.' };
   }
 
-  const hash = emailService.hashOtpCode(codeNorm);
-  if (hash !== row.code_hash) {
-    await supabase
-      .from('email_otps')
-      .update({ attempts: (row.attempts || 0) + 1 })
-      .eq('id', row.id);
-    return { ok: false, error: 'Invalid code' };
-  }
+  // Reserve an attempt before comparing, conditioned on the count we read, so
+  // parallel guesses can't all slip under MAX_ATTEMPTS.
+  const attempts = row.attempts || 0;
+  const { data: reserved } = await supabase
+    .from('email_otps')
+    .update({ attempts: attempts + 1 })
+    .eq('id', row.id)
+    .eq('attempts', attempts)
+    .is('consumed_at', null)
+    .select('id');
+  if (!reserved?.length) return { ok: false, error: 'Invalid code' };
 
-  await supabase
+  const matches =
+    emailService.hashOtpCode(codeNorm) === row.code_hash ||
+    emailService.legacyHashOtpCode(codeNorm) === row.code_hash;
+  if (!matches) return { ok: false, error: 'Invalid code' };
+
+  const { data: consumed } = await supabase
     .from('email_otps')
     .update({ consumed_at: new Date().toISOString() })
-    .eq('id', row.id);
+    .eq('id', row.id)
+    .is('consumed_at', null)
+    .select('id');
+  if (!consumed?.length) return { ok: false, error: 'Code already used. Request a new one.' };
 
   return { ok: true };
 }

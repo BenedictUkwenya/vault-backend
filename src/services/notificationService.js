@@ -99,4 +99,66 @@ async function createNotifications(items) {
   return results;
 }
 
-module.exports = { createNotification, createNotifications, sendPush };
+/**
+ * Bulk fan-out for broadcasts: one insert per chunk and batched Expo pushes,
+ * so it finishes within a serverless request. Email is skipped on purpose.
+ * Pass userIds to target specific users; otherwise every non-banned user.
+ */
+async function broadcast({ title, body, type = 'system', data = {}, userIds = null }) {
+  const PAGE = 1000;
+  let recipients = [];
+
+  if (Array.isArray(userIds) && userIds.length) {
+    for (let i = 0; i < userIds.length; i += PAGE) {
+      const { data: rows } = await supabase
+        .from('profiles')
+        .select('id, push_token, push_notifications')
+        .in('id', userIds.slice(i, i + PAGE))
+        .eq('is_banned', false);
+      recipients = recipients.concat(rows || []);
+    }
+  } else {
+    for (let from = 0; ; from += PAGE) {
+      const { data: rows, error } = await supabase
+        .from('profiles')
+        .select('id, push_token, push_notifications')
+        .eq('is_banned', false)
+        .order('id')
+        .range(from, from + PAGE - 1);
+      if (error) throw new Error(error.message);
+      recipients = recipients.concat(rows || []);
+      if (!rows || rows.length < PAGE) break;
+    }
+  }
+
+  let inserted = 0;
+  for (let i = 0; i < recipients.length; i += 500) {
+    const chunk = recipients.slice(i, i + 500).map((r) => ({
+      user_id: r.id,
+      title,
+      body: body || '',
+      type,
+      data,
+    }));
+    const { error } = await supabase.from('notifications').insert(chunk);
+    if (error) logger.warn('broadcast insert chunk failed', { message: error.message });
+    else inserted += chunk.length;
+  }
+
+  const messages = recipients
+    .filter((r) => r.push_notifications !== false && r.push_token && Expo.isExpoPushToken(r.push_token))
+    .map((r) => ({ to: r.push_token, sound: 'default', title, body, data: { type, ...data } }));
+  let pushed = 0;
+  for (const chunk of expo.chunkPushNotifications(messages)) {
+    try {
+      await expo.sendPushNotificationsAsync(chunk);
+      pushed += chunk.length;
+    } catch (err) {
+      logger.warn('broadcast push chunk failed', { message: err.message });
+    }
+  }
+
+  return { recipients: recipients.length, inserted, pushed };
+}
+
+module.exports = { createNotification, createNotifications, sendPush, broadcast };

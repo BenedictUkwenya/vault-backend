@@ -4,12 +4,19 @@ const EVENT_NAME = /^[a-z0-9_]{1,64}$/;
 const MAX_BATCH = 50;
 const MAX_PROPS_BYTES = 2048;
 const MAX_CLOCK_SKEW_MS = 7 * 24 * 60 * 60 * 1000;
+// The dashboard SQL casts these to integers; a string here would break every report.
+const NUMERIC_PROPS = new Set(['deals', 'businesses', 'bookings', 'count', 'position']);
 
 function sanitizeProps(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
   const out = {};
   for (const [key, value] of Object.entries(raw).slice(0, 20)) {
     const k = String(key).slice(0, 40);
+    if (NUMERIC_PROPS.has(k)) {
+      const n = Number(value);
+      if (Number.isFinite(n)) out[k] = Math.trunc(n);
+      continue;
+    }
     if (value === null || typeof value === 'number' || typeof value === 'boolean') out[k] = value;
     else if (value !== undefined) out[k] = String(value).slice(0, 200);
   }
