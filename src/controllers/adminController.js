@@ -49,29 +49,66 @@ const ANALYTICS_RANGES = new Set([7, 30, 90]);
 async function analyticsOverview(req, res) {
   const requested = parseInt(req.query.range, 10);
   const days = ANALYTICS_RANGES.has(requested) ? requested : 30;
+  const windowMs = days * 24 * 60 * 60 * 1000;
   const to = new Date();
-  const from = new Date(to.getTime() - days * 24 * 60 * 60 * 1000);
+  const from = new Date(to.getTime() - windowMs);
+  const prevFrom = new Date(from.getTime() - windowMs);
 
-  const { data, error } = await supabase.rpc('admin_analytics_overview', {
-    p_from: from.toISOString(),
-    p_to: to.toISOString(),
-  });
+  const [current, previous, platform] = await Promise.all([
+    supabase.rpc('admin_analytics_overview', { p_from: from.toISOString(), p_to: to.toISOString() }),
+    supabase.rpc('admin_analytics_overview', { p_from: prevFrom.toISOString(), p_to: from.toISOString() }),
+    platformTotals(),
+  ]);
 
-  if (error) {
-    logger.error('admin analytics overview failed', { error: error.message });
+  if (current.error) {
+    logger.error('admin analytics overview failed', { error: current.error.message });
     return res.status(503).json({
       error: 'Analytics unavailable',
-      detail: error.message,
+      detail: current.error.message,
       hint: 'Apply vault-backend/supabase/migrations/036_analytics_dashboard.sql',
     });
   }
 
+  const data = current.data && typeof current.data === 'object' ? current.data : { kpis: null };
   res.json({
     range_days: days,
     from: from.toISOString(),
     to: to.toISOString(),
-    ...(data && typeof data === 'object' ? data : { kpis: null }),
+    ...data,
+    previous_kpis: previous.error ? null : previous.data?.kpis ?? null,
+    platform,
   });
+}
+
+async function platformTotals() {
+  const count = (query) => query.then((r) => r.count || 0);
+  const profiles = () => supabase.from('profiles').select('id', { count: 'exact', head: true });
+  const businesses = () => supabase.from('businesses').select('id', { count: 'exact', head: true });
+  const statuses = ['approved', 'pending', 'rejected', 'suspended'];
+
+  const [totalUsers, tierCounts, totalBusinesses, statusCounts, liveDeals, subscribers] = await Promise.all([
+    count(profiles()),
+    Promise.all(TIERS.map((tier) => count(profiles().eq('membership_tier', tier)))),
+    count(businesses()),
+    Promise.all(statuses.map((status) => count(businesses().eq('review_status', status)))),
+    count(
+      supabase
+        .from('deals')
+        .select('id', { count: 'exact', head: true })
+        .eq('is_active', true)
+        .gt('end_date', new Date().toISOString())
+    ),
+    count(supabase.from('subscriptions').select('id', { count: 'exact', head: true }).eq('status', 'active')),
+  ]);
+
+  return {
+    total_users: totalUsers,
+    users_by_tier: TIERS.map((tier, i) => ({ tier, count: tierCounts[i] })),
+    total_businesses: totalBusinesses,
+    businesses_by_status: statuses.map((status, i) => ({ status, count: statusCounts[i] })),
+    live_deals: liveDeals,
+    active_subscriptions: subscribers,
+  };
 }
 
 async function listUsers(req, res) {
