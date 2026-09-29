@@ -43,6 +43,37 @@ async function stats(req, res) {
   });
 }
 
+const ANALYTICS_RANGES = new Set([7, 30, 90]);
+
+/** Product analytics overview — wraps admin_analytics_overview RPC for mobile + API clients. */
+async function analyticsOverview(req, res) {
+  const requested = parseInt(req.query.range, 10);
+  const days = ANALYTICS_RANGES.has(requested) ? requested : 30;
+  const to = new Date();
+  const from = new Date(to.getTime() - days * 24 * 60 * 60 * 1000);
+
+  const { data, error } = await supabase.rpc('admin_analytics_overview', {
+    p_from: from.toISOString(),
+    p_to: to.toISOString(),
+  });
+
+  if (error) {
+    logger.error('admin analytics overview failed', { error: error.message });
+    return res.status(503).json({
+      error: 'Analytics unavailable',
+      detail: error.message,
+      hint: 'Apply vault-backend/supabase/migrations/036_analytics_dashboard.sql',
+    });
+  }
+
+  res.json({
+    range_days: days,
+    from: from.toISOString(),
+    to: to.toISOString(),
+    ...(data && typeof data === 'object' ? data : { kpis: null }),
+  });
+}
+
 async function listUsers(req, res) {
   const { search, role, tier, banned } = req.query;
   const { limit, offset } = pageParams(req.query);
@@ -645,6 +676,7 @@ async function deleteUser(req, res) {
 
 module.exports = {
   stats,
+  analyticsOverview,
   listUsers,
   getUser,
   updateUser,

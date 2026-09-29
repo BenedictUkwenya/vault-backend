@@ -26,6 +26,7 @@ router.post('/security/logout', asyncHandler(adminController.securityLogout));
 
 // Read-only admin views (login as admin is enough)
 router.get('/stats', asyncHandler(adminController.stats));
+router.get('/analytics', asyncHandler(adminController.analyticsOverview));
 router.get('/users', asyncHandler(adminController.listUsers));
 router.get('/users/:id', asyncHandler(adminController.getUser));
 router.get('/businesses', asyncHandler(adminController.listBusinesses));
