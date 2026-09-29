@@ -242,6 +242,7 @@ async function register(req, res) {
     facebook_handle,
     tiktok_handle,
     twitter_handle,
+    category_other,
   } = req.body;
 
   const { data, error } = await supabase
@@ -250,6 +251,7 @@ async function register(req, res) {
       owner_id: req.user.id,
       name,
       category_id,
+      ...(category_other ? { category_other: String(category_other).trim().slice(0, 60) } : {}),
       city,
       address,
       state: state || null,
@@ -311,6 +313,7 @@ async function updateMy(req, res) {
     'email',
     'website',
     'category_id',
+    'category_other',
     'logo_url',
     'cover_url',
     'images',
@@ -333,6 +336,9 @@ async function updateMy(req, res) {
   }
   if (updates.images !== undefined && !Array.isArray(updates.images)) {
     return res.status(400).json({ error: 'images must be an array of URLs' });
+  }
+  if (updates.category_other !== undefined) {
+    updates.category_other = String(updates.category_other || '').trim().slice(0, 60) || null;
   }
   if (updates.country !== undefined) updates.timezone = timezoneForCountry(updates.country);
 
