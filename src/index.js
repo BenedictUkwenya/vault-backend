@@ -109,6 +109,8 @@ app.use('/api/passport', passportRoutes);
 app.use('/api/network', networkRoutes);
 app.use('/api/markets', marketsRoutes);
 app.use('/api/analytics', require('./routes/analytics'));
+app.use('/api/pros', require('./routes/pros'));
+app.use('/api/ai', require('./routes/ai'));
 
 // ── 404 ───────────────────────────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));

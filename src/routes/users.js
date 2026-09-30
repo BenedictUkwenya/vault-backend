@@ -3,6 +3,9 @@ const { body } = require('express-validator');
 const { authenticate } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
 const usersController = require('../controllers/usersController');
+const prosController = require('../controllers/prosController');
+
+router.get('/founding-wall', asyncHandler(prosController.membersFoundingWall));
 
 router.get('/profile', authenticate, asyncHandler(usersController.getProfile));
 router.patch(

@@ -140,7 +140,8 @@ async function handleSubscriptionUpsert(sub) {
     }
   }
 
-  if (isActive && !isBusiness) {
+  // Trials grant access but don't count as a paid referral until the first charge.
+  if (sub.status === 'active' && !isBusiness) {
     await referralService.recordReferralEvent(profile.id, 'subscribe');
   }
 }
@@ -193,7 +194,8 @@ async function handlePaymentSucceeded(invoice) {
     .eq('stripe_customer_id', customerId)
     .single();
 
-  if (profile) {
+  // A trial start produces a $0 invoice, which is not a paid subscription.
+  if (profile && invoice.amount_paid > 0) {
     await referralService.recordReferralEvent(profile.id, 'subscribe');
   }
 }

@@ -14,7 +14,15 @@ async function getOrCreateCustomer(userId, email, existingCustomerId) {
   return customer.id;
 }
 
-async function createCheckoutSession({ customerId, priceId, successUrl, cancelUrl, userId, subscriptionType }) {
+async function createCheckoutSession({
+  customerId,
+  priceId,
+  successUrl,
+  cancelUrl,
+  userId,
+  subscriptionType,
+  trialPeriodDays,
+}) {
   return stripe.checkout.sessions.create({
     customer: customerId,
     payment_method_types: ['card'],
@@ -25,6 +33,7 @@ async function createCheckoutSession({ customerId, priceId, successUrl, cancelUr
     metadata: { userId, subscriptionType },
     subscription_data: {
       metadata: { userId, subscriptionType },
+      ...(trialPeriodDays ? { trial_period_days: trialPeriodDays } : {}),
     },
   });
 }

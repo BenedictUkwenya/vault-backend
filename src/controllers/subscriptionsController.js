@@ -2,6 +2,22 @@ const supabase = require('../config/supabase');
 const stripeService = require('../services/stripeService');
 const membership = require('../services/membershipService');
 
+const TRIAL_PERIOD_DAYS = 7;
+// Checkouts abandoned before payment leave these statuses behind; they don't use up the trial.
+const NEVER_STARTED_STATUSES = new Set(['incomplete', 'incomplete_expired']);
+
+/** The free trial is for first-time member subscribers only. Fails closed so a DB error never grants a trial. */
+async function isTrialEligible(userId) {
+  const { data, error } = await supabase
+    .from('subscriptions')
+    .select('subscription_type, status')
+    .eq('user_id', userId);
+  if (error) return false;
+  return !(data || []).some(
+    (s) => s.subscription_type !== 'business' && !NEVER_STARTED_STATUSES.has(s.status)
+  );
+}
+
 async function getPlans(_req, res) {
   res.json({
     member_plans: membership.MEMBER_PLANS,
@@ -48,7 +64,10 @@ async function getStatus(req, res) {
 
   const tier = membership.effectiveTier(profile);
   const limit = membership.redemptionLimitForTier(tier);
-  const used = await countVerifiedThisMonth(req.user.id);
+  const [used, trialEligible] = await Promise.all([
+    countVerifiedThisMonth(req.user.id),
+    isTrialEligible(req.user.id),
+  ]);
   const remaining = limit == null ? null : Math.max(0, limit - used);
 
   res.json({
@@ -57,6 +76,8 @@ async function getStatus(req, res) {
     expires_at: profile?.membership_expires_at,
     student_verified_at: profile?.student_verified_at ?? null,
     subscription,
+    trial_eligible: trialEligible,
+    trial_period_days: TRIAL_PERIOD_DAYS,
     redemptions: {
       used_this_month: used,
       limit,
@@ -115,6 +136,8 @@ async function createCheckout(req, res) {
     });
   }
 
+  const withTrial = checkoutType !== 'business' && (await isTrialEligible(req.user.id));
+
   const session = await stripeService.createCheckoutSession({
     customerId,
     priceId,
@@ -122,6 +145,7 @@ async function createCheckout(req, res) {
     cancelUrl: safeReturnUrl(cancel_url, `${process.env.FRONTEND_URL}/membership?canceled=true`),
     userId: req.user.id,
     subscriptionType: checkoutType,
+    trialPeriodDays: withTrial ? TRIAL_PERIOD_DAYS : undefined,
   });
 
   res.json({ checkout_url: session.url, session_id: session.id });

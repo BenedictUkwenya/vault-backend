@@ -37,6 +37,10 @@ router.get('/subscriptions', asyncHandler(adminController.listSubscriptions));
 const mediaController = require('../controllers/mediaController');
 router.get('/media', asyncHandler(mediaController.listAdmin));
 
+const prosController = require('../controllers/prosController');
+router.get('/pros', asyncHandler(prosController.adminList));
+router.get('/qa-reviews', asyncHandler(prosController.adminQaReviews));
+
 // Mutations require email verification token
 router.use(requireAdminStepUp);
 
@@ -56,5 +60,7 @@ router.post('/notifications/broadcast', asyncHandler(adminController.broadcastNo
 router.post('/media', asyncHandler(mediaController.create));
 router.patch('/media/:id', asyncHandler(mediaController.update));
 router.delete('/media/:id', asyncHandler(mediaController.remove));
+router.patch('/pros/:id/approve', asyncHandler(prosController.adminApprove));
+router.patch('/pros/:id/reject', asyncHandler(prosController.adminReject));
 
 module.exports = router;

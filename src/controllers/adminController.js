@@ -4,6 +4,7 @@ const { ensureBusinessRole } = require('../utils/ensureBusinessRole');
 const notificationService = require('../services/notificationService');
 const { logAdminAction } = require('../utils/adminAudit');
 const { syncEffectiveTier } = require('../services/tierSync');
+const qaService = require('../services/qaService');
 
 const ROLES = ['user', 'business', 'ambassador', 'admin', 'super_admin'];
 const ADMIN_ROLES = ['admin', 'super_admin'];
@@ -309,6 +310,12 @@ async function listBusinesses(req, res) {
 }
 
 async function approveBusiness(req, res) {
+  // The web admin approves without a checklist; the mobile QA flow always sends one.
+  const checklist = req.body?.checklist ? qaService.normalizeChecklist('business', req.body.checklist) : null;
+  if (checklist && !qaService.isComplete('business', checklist)) {
+    return res.status(400).json({ error: 'Complete every quality-assurance check before approving.' });
+  }
+
   const { data: existing, error: fetchError } = await supabase
     .from('businesses')
     .select('id, owner_id, is_founding_member, founding_member_number, is_approved')
@@ -387,6 +394,14 @@ async function approveBusiness(req, res) {
       .catch(() => null);
   }
 
+  await qaService.recordReview({
+    entityType: 'business',
+    entityId: data.id,
+    reviewerId: req.user.id,
+    checklist: checklist || {},
+    outcome: 'approved',
+    notes: req.body?.notes,
+  });
   await logAdminAction(req, {
     action: 'business.approve',
     targetType: 'business',
@@ -426,6 +441,15 @@ async function rejectBusiness(req, res) {
     .single();
 
   if (error) return res.status(400).json({ error: error.message });
+
+  await qaService.recordReview({
+    entityType: 'business',
+    entityId: existing.id,
+    reviewerId: req.user.id,
+    checklist: req.body?.checklist ? qaService.normalizeChecklist('business', req.body.checklist) : {},
+    outcome: 'rejected',
+    notes: reason,
+  });
 
   if (existing.owner_id) {
     await notificationService

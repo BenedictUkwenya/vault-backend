@@ -5,12 +5,13 @@ const emailService = require('../services/emailService');
 const otpService = require('../services/otpService');
 const logger = require('../config/logger');
 const { findProfileIdByEmail: findAuthUserIdByEmail } = require('../utils/emailLookup');
+const { termsAcceptanceFields, writeWithTermsFallback } = require('../utils/termsAcceptance');
 
 async function register(req, res) {
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(422).json({ errors: errors.array() });
 
-  const { email, password, full_name, referral_code } = req.body;
+  const { email, password, full_name, referral_code, accepted_terms } = req.body;
   const emailNorm = String(email).trim().toLowerCase();
 
   const { data, error } = await supabase.auth.admin.createUser({
@@ -23,10 +24,12 @@ async function register(req, res) {
   if (error) return res.status(400).json({ error: error.message });
 
   const code = referralService.generateCode();
-  await supabase
-    .from('profiles')
-    .update({ full_name, referral_code: code, email: emailNorm })
-    .eq('id', data.user.id);
+  await writeWithTermsFallback((row) => supabase.from('profiles').update(row).eq('id', data.user.id), {
+    full_name,
+    referral_code: code,
+    email: emailNorm,
+    ...(accepted_terms ? termsAcceptanceFields() : {}),
+  });
 
   if (referral_code) {
     const applied = await referralService.applyReferral(data.user.id, referral_code);

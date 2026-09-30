@@ -3,6 +3,7 @@ const { ensureBusinessRole } = require('../utils/ensureBusinessRole');
 const membership = require('../services/membershipService');
 const notificationService = require('../services/notificationService');
 const { timezoneForCountry } = require('../utils/timezone');
+const { termsAcceptanceFields, writeWithTermsFallback } = require('../utils/termsAcceptance');
 
 /** Votes are keyed to the UTC month, matching the business_votes.vote_month unique index. */
 function monthStartUtc() {
@@ -213,6 +214,10 @@ async function myBusinessRating(req, res) {
 }
 
 async function register(req, res) {
+  if (req.body.accepted_terms !== true) {
+    return res.status(400).json({ error: 'Please accept the Business Partner Terms & Conditions' });
+  }
+
   const existing = await supabase
     .from('businesses')
     .select('id')
@@ -245,9 +250,9 @@ async function register(req, res) {
     category_other,
   } = req.body;
 
-  const { data, error } = await supabase
-    .from('businesses')
-    .insert({
+  const { data, error } = await writeWithTermsFallback(
+    (row) => supabase.from('businesses').insert(row).select().single(),
+    {
       owner_id: req.user.id,
       name,
       category_id,
@@ -270,9 +275,9 @@ async function register(req, res) {
       timezone: timezoneForCountry(country),
       is_approved: false,
       review_status: 'pending',
-    })
-    .select()
-    .single();
+      ...termsAcceptanceFields(),
+    }
+  );
 
   if (error?.code === '23505') {
     return res.status(409).json({ error: 'You already have a registered business' });
