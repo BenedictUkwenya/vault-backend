@@ -172,7 +172,30 @@ async function apply(req, res) {
     logger.error('BL Pro application failed', { userId: req.user.id, error: error.message });
     return res.status(400).json({ error: error.message });
   }
+  await notifyAdminsOfApplication(data, !!existing);
   res.status(existing ? 200 : 201).json({ pro: data, resubmitted: !!existing });
+}
+
+async function notifyAdminsOfApplication(pro, resubmitted) {
+  try {
+    const { data: admins } = await supabase
+      .from('profiles')
+      .select('id')
+      .in('role', ['admin', 'super_admin']);
+    if (!admins?.length) return;
+    const place = [pro.city, pro.state].filter(Boolean).join(', ');
+    await notificationService.createNotifications(
+      admins.map((a) => ({
+        userId: a.id,
+        title: resubmitted ? 'BL Pro application resubmitted' : 'New BL Pro application',
+        body: `${pro.display_name} (${pro.profession}${place ? ` · ${place}` : ''}) is waiting for verification.`,
+        type: 'system',
+        data: { kind: 'pro_application', pro_id: pro.id },
+      }))
+    );
+  } catch (err) {
+    logger.warn('BL Pro admin notification failed', { proId: pro?.id, message: err.message });
+  }
 }
 
 async function adminList(req, res) {
