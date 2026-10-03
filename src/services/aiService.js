@@ -15,7 +15,7 @@ function aiError(message, status = 502) {
 }
 
 async function chatCompletion(messages, { maxTokens = 600, temperature = 0.6 } = {}) {
-  if (!isConfigured()) throw aiError('BL AI is not configured yet.', 503);
+  if (!isConfigured()) throw aiError('Limi is not configured yet.', 503);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -39,9 +39,9 @@ async function chatCompletion(messages, { maxTokens = 600, temperature = 0.6 } =
       signal: controller.signal,
     });
   } catch (err) {
-    if (err.name === 'AbortError') throw aiError('BL AI took too long to respond. Please try again.', 504);
+    if (err.name === 'AbortError') throw aiError('Limi took too long to respond. Please try again.', 504);
     logger.error({ message: 'OpenRouter request failed', error: err.message });
-    throw aiError('BL AI is unavailable right now. Please try again shortly.');
+    throw aiError('Limi is unavailable right now. Please try again shortly.');
   } finally {
     clearTimeout(timer);
   }
@@ -54,14 +54,14 @@ async function chatCompletion(messages, { maxTokens = 600, temperature = 0.6 } =
       status: response.status,
       error: data?.error?.message || null,
     });
-    if (response.status === 429) throw aiError('BL AI is busy right now. Please try again in a moment.', 429);
-    throw aiError('BL AI is unavailable right now. Please try again shortly.');
+    if (response.status === 429) throw aiError('Limi is busy right now. Please try again in a moment.', 429);
+    throw aiError('Limi is unavailable right now. Please try again shortly.');
   }
 
   const reply = data?.choices?.[0]?.message?.content;
   if (typeof reply !== 'string' || !reply.trim()) {
     logger.error({ message: 'OpenRouter returned an empty reply', model: data?.model || null });
-    throw aiError('BL AI could not come up with an answer. Please try rephrasing.');
+    throw aiError('Limi could not come up with an answer. Please try rephrasing.');
   }
 
   return reply.trim();

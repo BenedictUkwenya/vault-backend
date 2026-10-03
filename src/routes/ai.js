@@ -10,7 +10,7 @@ const aiLimiter = createLimiter('ai', {
   keyGenerator: (req) => `ai:${req.user?.id || req.ip}`,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'You’re chatting fast! Give BL AI a few minutes and try again.' },
+  message: { error: 'You’re chatting fast! Give Limi a few minutes and try again.' },
 });
 
 router.post('/chat', authenticate, aiLimiter, asyncHandler(aiController.chat));

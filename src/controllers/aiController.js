@@ -22,7 +22,7 @@ async function safeQuery(label, query) {
     if (error) throw error;
     return data;
   } catch (err) {
-    logger.warn({ message: `BL AI context query failed: ${label}`, error: err.message });
+    logger.warn({ message: `Limi context query failed: ${label}`, error: err.message });
     return null;
   }
 }
@@ -87,7 +87,7 @@ function buildSystemPrompt({ profile, deals, businesses }) {
   ].filter(Boolean);
 
   return [
-    `You are BL AI, the concierge assistant inside the ${APP_NAME} app — a membership network offering exclusive deals, experiences and partner businesses.`,
+    `You are Limi, the AI concierge inside the ${APP_NAME} app — a membership network offering exclusive deals, experiences and partner businesses.`,
     `Today is ${new Date().toISOString().slice(0, 10)}.`,
     '',
     'Guidelines:',
@@ -113,11 +113,11 @@ function buildSystemPrompt({ profile, deals, businesses }) {
 async function chat(req, res) {
   const messages = sanitizeMessages(req.body?.messages);
   if (!messages.length || messages[messages.length - 1].role !== 'user') {
-    return res.status(400).json({ error: 'Send a message to BL AI.' });
+    return res.status(400).json({ error: 'Send a message to Limi.' });
   }
 
   if (!aiService.isConfigured()) {
-    return res.status(503).json({ error: 'BL AI is not configured yet.' });
+    return res.status(503).json({ error: 'Limi is not configured yet.' });
   }
 
   const [profile, deals, businesses] = await loadContext(req.user.id);
@@ -127,8 +127,8 @@ async function chat(req, res) {
     const reply = await aiService.chatCompletion([{ role: 'system', content: system }, ...messages]);
     res.json({ reply });
   } catch (err) {
-    logger.error({ message: 'BL AI chat failed', userId: req.user.id, error: err.message });
-    res.status(err.status || 500).json({ error: err.status ? err.message : 'BL AI is unavailable right now.' });
+    logger.error({ message: 'Limi chat failed', userId: req.user.id, error: err.message });
+    res.status(err.status || 500).json({ error: err.status ? err.message : 'Limi is unavailable right now.' });
   }
 }
 
