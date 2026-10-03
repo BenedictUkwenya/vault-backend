@@ -2,7 +2,7 @@ const supabase = require('../config/supabase');
 const logger = require('../config/logger');
 const aiService = require('../services/aiService');
 
-const APP_NAME = process.env.APP_NAME || 'Black Limitless';
+const BRAND = 'Black Limitless';
 const MAX_MESSAGES = 20;
 const MAX_CONTENT_CHARS = 2000;
 const CONTEXT_LIMIT = 25;
@@ -87,11 +87,13 @@ function buildSystemPrompt({ profile, deals, businesses }) {
   ].filter(Boolean);
 
   return [
-    `You are Limi, the AI concierge inside the ${APP_NAME} app — a membership network offering exclusive deals, experiences and partner businesses.`,
+    `You are Limi, the AI concierge inside the ${BRAND} app — a membership network offering exclusive deals, experiences and partner businesses.`,
     `Today is ${new Date().toISOString().slice(0, 10)}.`,
     '',
     'Guidelines:',
+    `- Always call the app "${BRAND}". Never call it Vault or any other name.`,
     '- Be concise, warm and premium in tone. Use short paragraphs or brief bullet lists; no long essays.',
+    '- Formatting: only use **bold** for business or deal names and "- " for bullet points. No headings, tables, links, code or emojis.',
     '- Recommend specific deals and businesses only from the live data below. Never invent deals, discounts, prices, businesses, addresses or opening hours. If nothing fits, say so and suggest browsing the Deals or Explore tabs.',
     '- Prefer options in the member\'s city when relevant, and mention when a deal requires a paid or VIP tier.',
     '- Membership questions: explain generally that tiers (free, student, member, VIP) unlock progressively more deals and perks, and point them to the Membership tab for current plans and pricing.',
