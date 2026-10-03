@@ -5,6 +5,7 @@ const notificationsController = require('../controllers/notificationsController'
 
 router.get('/', authenticate, asyncHandler(notificationsController.list));
 router.get('/unread-count', authenticate, asyncHandler(notificationsController.unreadCount));
+router.get('/badges', authenticate, asyncHandler(notificationsController.badges));
 router.post('/:id/read', authenticate, asyncHandler(notificationsController.markRead));
 router.post('/read-all', authenticate, asyncHandler(notificationsController.markAllRead));
 router.delete('/:id', authenticate, asyncHandler(notificationsController.remove));
