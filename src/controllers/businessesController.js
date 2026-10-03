@@ -1,4 +1,5 @@
 const supabase = require('../config/supabase');
+const logger = require('../config/logger');
 const { ensureBusinessRole } = require('../utils/ensureBusinessRole');
 const membership = require('../services/membershipService');
 const notificationService = require('../services/notificationService');
@@ -213,6 +214,17 @@ async function myBusinessRating(req, res) {
   res.json({ my_rating: data?.rating ?? null });
 }
 
+/** Retries without category_other on databases that haven't applied migration 039. */
+async function writeWithCategoryOtherFallback(write, row) {
+  const result = await write(row);
+  const missing =
+    result.error && 'category_other' in row && /category_other/.test(result.error.message || '');
+  if (!missing) return result;
+  logger.warn('category_other column missing — apply migration 039');
+  const { category_other: _other, ...rest } = row;
+  return write(rest);
+}
+
 async function register(req, res) {
   if (req.body.accepted_terms !== true) {
     return res.status(400).json({ error: 'Please accept the Business Partner Terms & Conditions' });
@@ -251,7 +263,8 @@ async function register(req, res) {
   } = req.body;
 
   const { data, error } = await writeWithTermsFallback(
-    (row) => supabase.from('businesses').insert(row).select().single(),
+    (row) =>
+      writeWithCategoryOtherFallback((r) => supabase.from('businesses').insert(r).select().single(), row),
     {
       owner_id: req.user.id,
       name,
@@ -359,12 +372,10 @@ async function updateMy(req, res) {
   const resubmitted = current.review_status === 'rejected' && req.body.resubmit !== false;
   if (resubmitted) updates.review_status = 'pending';
 
-  const { data, error } = await supabase
-    .from('businesses')
-    .update({ ...updates, updated_at: new Date().toISOString() })
-    .eq('id', current.id)
-    .select()
-    .single();
+  const { data, error } = await writeWithCategoryOtherFallback(
+    (row) => supabase.from('businesses').update(row).eq('id', current.id).select().single(),
+    { ...updates, updated_at: new Date().toISOString() }
+  );
 
   if (error) return res.status(400).json({ error: error.message });
   res.json({ ...data, resubmitted });
@@ -422,6 +433,8 @@ async function getAnalytics(req, res) {
     if (idx >= 0) dailyCounts[idx] += 1;
   }
 
+  const engagement = await engagement30d(business.id, thirtyDaysAgo);
+
   res.json({
     redemptions_30d: redemptions30d.count || 0,
     bookings_30d: bookings30d.count || 0,
@@ -430,7 +443,39 @@ async function getAnalytics(req, res) {
     rating_count: ratingCount.count || 0,
     redemptions_7d: dailyCounts,
     redemptions_7d_labels: keys,
+    engagement_30d: engagement,
   });
+}
+
+/** Impressions, taps and CTR for the listing and its deals, from in-app analytics events. */
+async function engagement30d(businessId, since) {
+  const count = (query) => query.then(({ count: n, error }) => (error ? 0 : n || 0));
+  const events = () =>
+    supabase.from('analytics_events').select('id', { count: 'exact', head: true }).gte('created_at', since);
+
+  const { data: deals } = await supabase.from('deals').select('id').eq('business_id', businessId);
+  const dealIds = (deals || []).map((d) => d.id);
+
+  const [listingImpressions, listingClicks, dealImpressions, dealClicks] = await Promise.all([
+    count(events().eq('event', 'impression').eq('props->>item_type', 'business').eq('props->>item_id', businessId)),
+    count(events().eq('event', 'item_click').eq('props->>item_type', 'business').eq('props->>item_id', businessId)),
+    dealIds.length
+      ? count(events().eq('event', 'impression').eq('props->>item_type', 'deal').in('props->>item_id', dealIds))
+      : 0,
+    dealIds.length
+      ? count(events().eq('event', 'item_click').eq('props->>item_type', 'deal').in('props->>item_id', dealIds))
+      : 0,
+  ]);
+
+  const impressions = listingImpressions + dealImpressions;
+  const clicks = listingClicks + dealClicks;
+  return {
+    impressions,
+    clicks,
+    ctr: impressions > 0 ? clicks / impressions : 0,
+    listing: { impressions: listingImpressions, clicks: listingClicks },
+    deals: { impressions: dealImpressions, clicks: dealClicks },
+  };
 }
 
 async function vote(req, res) {
