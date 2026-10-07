@@ -3,6 +3,7 @@ const { validationResult } = require('express-validator');
 const { parseEndDate } = require('../utils/parseEndDate');
 const { resolveRedemptionId } = require('../utils/resolveRedemptionId');
 const membership = require('../services/membershipService');
+const terms = require('../utils/termsAcceptance');
 const passportService = require('../services/passportService');
 const notificationService = require('../services/notificationService');
 
@@ -218,6 +219,13 @@ async function redeem(req, res) {
     return res.status(403).json({ error: 'You can’t redeem deals at your own business.' });
   }
 
+  if (terms.clientOnCurrentAgreements(req) && !(await terms.memberTermsCurrent(userId))) {
+    return res.status(403).json({
+      error: 'Accept the current Member and Platform Terms before redeeming.',
+      code: 'terms_required',
+    });
+  }
+
   if (deal.requires_vip_tier) {
     const { data: profile } = await supabase
       .from('profiles')
@@ -410,6 +418,7 @@ async function create(req, res) {
   const business = await getOwnedBusiness(req.user.id, 'id, is_approved, review_status, timezone');
 
   if (!business) return res.status(403).json({ error: 'No registered business found' });
+  if (!(await ensureOfferAcceptance(req, res, business.id))) return;
   // Pending businesses can prepare deals; they stay hidden until the business is approved.
   if (['rejected', 'suspended'].includes(business.review_status)) {
     return res.status(403).json({
@@ -491,6 +500,30 @@ async function getMine(req, res) {
   res.json(data);
 }
 
+async function ensureProviderTerms(req, res, businessId) {
+  if (!terms.clientOnCurrentAgreements(req)) return true;
+  if (await terms.providerTermsCurrent(businessId)) return true;
+  res.status(403).json({
+    error: 'Accept the current Business and Provider Agreement before publishing an offer.',
+    code: 'provider_terms_required',
+  });
+  return false;
+}
+
+async function ensureOfferAcceptance(req, res, businessId) {
+  if (!terms.clientOnCurrentAgreements(req)) return true;
+  if (req.body.offer_confirmed !== true) {
+    res.status(400).json({ error: 'Confirm that this offer is accurate and that you will honor it.' });
+    return false;
+  }
+  if (!(await ensureProviderTerms(req, res, businessId))) return false;
+  await terms.recordAcceptance(req.user.id, {
+    agreementId: 'offer',
+    checkboxText: terms.CHECKBOX.offer,
+  });
+  return true;
+}
+
 async function update(req, res) {
   const business = await getOwnedBusiness(req.user.id, 'id, timezone');
   if (!business) return res.status(403).json({ error: 'Unauthorized' });
@@ -509,6 +542,11 @@ async function update(req, res) {
   for (const key of allowed) {
     if (req.body[key] !== undefined) updates[key] = req.body[key];
   }
+
+  const offerKeys = ['title', 'description', 'discount_percentage', 'terms', 'end_date', 'original_price', 'image_url', 'images', 'requires_paid_tier'];
+  const changesOffer = offerKeys.some((key) => updates[key] !== undefined);
+  if (changesOffer && !(await ensureOfferAcceptance(req, res, business.id))) return;
+  if (!changesOffer && updates.is_active === true && !(await ensureProviderTerms(req, res, business.id))) return;
 
   if (updates.is_active === true && current.admin_suspended_at) {
     return res.status(403).json({

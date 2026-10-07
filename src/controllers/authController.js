@@ -5,7 +5,8 @@ const emailService = require('../services/emailService');
 const otpService = require('../services/otpService');
 const logger = require('../config/logger');
 const { findProfileIdByEmail: findAuthUserIdByEmail } = require('../utils/emailLookup');
-const { termsAcceptanceFields, writeWithTermsFallback } = require('../utils/termsAcceptance');
+const terms = require('../utils/termsAcceptance');
+const { termsAcceptanceFields, writeWithTermsFallback } = terms;
 
 async function register(req, res) {
   const errors = validationResult(req);
@@ -28,8 +29,15 @@ async function register(req, res) {
     full_name,
     referral_code: code,
     email: emailNorm,
-    ...(accepted_terms ? termsAcceptanceFields() : {}),
+    ...(accepted_terms ? termsAcceptanceFields(terms.versionFor(req)) : {}),
   });
+
+  if (accepted_terms && terms.clientOnCurrentAgreements(req)) {
+    await terms.recordAcceptance(data.user.id, {
+      agreementId: 'member',
+      checkboxText: terms.CHECKBOX.member,
+    });
+  }
 
   if (referral_code) {
     const applied = await referralService.applyReferral(data.user.id, referral_code);
@@ -254,6 +262,65 @@ async function resetPassword(req, res) {
   res.json({ message: 'Password updated' });
 }
 
+async function acceptAgreements(req, res) {
+  const parts = Array.isArray(req.body.parts) ? req.body.parts.map(String) : [];
+  if (!parts.length) return res.status(400).json({ error: 'Choose the agreements to accept.' });
+
+  if (parts.includes('member')) {
+    if (req.body.accepted_member !== true) {
+      return res.status(400).json({ error: 'Please accept the Member and Platform Terms.' });
+    }
+    const updated = await writeWithTermsFallback(
+      (row) => supabase.from('profiles').update(row).eq('id', req.user.id),
+      termsAcceptanceFields(terms.TERMS_VERSION)
+    );
+    if (updated.error) return res.status(400).json({ error: updated.error.message });
+    await terms.recordAcceptance(req.user.id, {
+      agreementId: 'member',
+      checkboxText: terms.CHECKBOX.member,
+    });
+  }
+
+  if (parts.includes('business')) {
+    if (req.body.accepted_provider !== true) {
+      return res.status(400).json({ error: 'Please accept the Business and Provider Agreement.' });
+    }
+    const identity = terms.providerIdentity(req.body || {});
+    if (identity.error) return res.status(400).json({ error: identity.error });
+    const { data: business, error: lookupError } = await supabase
+      .from('businesses')
+      .select('id')
+      .eq('owner_id', req.user.id)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (lookupError) return res.status(400).json({ error: lookupError.message });
+    if (!business) return res.status(400).json({ error: 'Register a business before accepting the provider agreement.' });
+
+    const updated = await writeWithTermsFallback(
+      (row) => supabase.from('businesses').update(row).eq('id', business.id),
+      {
+        ...termsAcceptanceFields(terms.TERMS_VERSION),
+        legal_name: identity.legal_name,
+        entity_type: identity.entity_type,
+        signer_name: identity.signer_name,
+        signer_title: identity.signer_title,
+      }
+    );
+    if (updated.error) return res.status(400).json({ error: updated.error.message });
+    await terms.recordAcceptance(req.user.id, {
+      agreementId: 'business',
+      checkboxText: terms.CHECKBOX.business,
+      signerName: identity.signer_name,
+      providerLegalName: identity.legal_name,
+      entityType: identity.entity_type,
+      signerTitle: identity.signer_title,
+    });
+  }
+
+  res.json({ terms_version: terms.TERMS_VERSION });
+}
+
 async function getMe(req, res) {
   const { data: profile } = await supabase
     .from('profiles')
@@ -273,5 +340,6 @@ module.exports = {
   forgotPassword,
   resetPasswordWithCode,
   resetPassword,
+  acceptAgreements,
   getMe,
 };

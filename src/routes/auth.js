@@ -76,6 +76,7 @@ router.post(
   asyncHandler(authController.resetPassword)
 );
 
+router.post('/accept-agreements', authenticate, asyncHandler(authController.acceptAgreements));
 router.get('/me', authenticate, asyncHandler(authController.getMe));
 
 module.exports = router;

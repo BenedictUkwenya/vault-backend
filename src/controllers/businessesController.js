@@ -4,7 +4,8 @@ const { ensureBusinessRole } = require('../utils/ensureBusinessRole');
 const membership = require('../services/membershipService');
 const notificationService = require('../services/notificationService');
 const { timezoneForCountry } = require('../utils/timezone');
-const { termsAcceptanceFields, writeWithTermsFallback } = require('../utils/termsAcceptance');
+const terms = require('../utils/termsAcceptance');
+const { termsAcceptanceFields, writeWithTermsFallback } = terms;
 
 /** Votes are keyed to the UTC month, matching the business_votes.vote_month unique index. */
 function monthStartUtc() {
@@ -227,8 +228,11 @@ async function writeWithCategoryOtherFallback(write, row) {
 
 async function register(req, res) {
   if (req.body.accepted_terms !== true) {
-    return res.status(400).json({ error: 'Please accept the Business Partner Terms & Conditions' });
+    return res.status(400).json({ error: 'Please accept the Business and Provider Agreement' });
   }
+
+  const identity = terms.clientOnCurrentAgreements(req) ? terms.providerIdentity(req.body || {}) : null;
+  if (identity?.error) return res.status(400).json({ error: identity.error });
 
   const existing = await supabase
     .from('businesses')
@@ -288,7 +292,15 @@ async function register(req, res) {
       timezone: timezoneForCountry(country),
       is_approved: false,
       review_status: 'pending',
-      ...termsAcceptanceFields(),
+      ...termsAcceptanceFields(terms.versionFor(req)),
+      ...(identity
+        ? {
+            legal_name: identity.legal_name,
+            entity_type: identity.entity_type,
+            signer_name: identity.signer_name,
+            signer_title: identity.signer_title,
+          }
+        : {}),
     }
   );
 
@@ -298,6 +310,17 @@ async function register(req, res) {
   if (error) return res.status(400).json({ error: error.message });
 
   await ensureBusinessRole(req.user.id);
+
+  if (identity) {
+    await terms.recordAcceptance(req.user.id, {
+      agreementId: 'business',
+      checkboxText: terms.CHECKBOX.business,
+      signerName: identity.signer_name,
+      providerLegalName: identity.legal_name,
+      entityType: identity.entity_type,
+      signerTitle: identity.signer_title,
+    });
+  }
 
   res.status(201).json(data);
 }

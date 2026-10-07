@@ -1,6 +1,7 @@
 const supabase = require('../config/supabase');
 const stripeService = require('../services/stripeService');
 const membership = require('../services/membershipService');
+const terms = require('../utils/termsAcceptance');
 
 const TRIAL_PERIOD_DAYS = 7;
 // Checkouts abandoned before payment leave these statuses behind; they don't use up the trial.
@@ -137,6 +138,23 @@ async function createCheckout(req, res) {
   }
 
   const withTrial = checkoutType !== 'business' && (await isTrialEligible(req.user.id));
+
+  if (terms.clientOnCurrentAgreements(req)) {
+    if (req.body.billing_authorized !== true) {
+      return res.status(400).json({
+        error: 'Please authorize the recurring membership charge before checkout.',
+        code: 'billing_authorization_required',
+      });
+    }
+    const plan = checkoutType === 'business'
+      ? membership.BUSINESS_PLAN
+      : membership.MEMBER_PLANS.find((item) => item.checkout_type === checkoutType);
+    const trialDays = withTrial ? TRIAL_PERIOD_DAYS : null;
+    await terms.recordAcceptance(req.user.id, {
+      agreementId: 'subscription',
+      checkboxText: terms.billingConsentText(plan?.price_label || '', trialDays || 0, trialDays),
+    });
+  }
 
   const session = await stripeService.createCheckoutSession({
     customerId,

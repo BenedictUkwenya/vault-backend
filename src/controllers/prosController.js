@@ -3,6 +3,7 @@ const logger = require('../config/logger');
 const notificationService = require('../services/notificationService');
 const qaService = require('../services/qaService');
 const { logAdminAction } = require('../utils/adminAudit');
+const terms = require('../utils/termsAcceptance');
 
 const FOUNDING_CAPACITY = 100;
 const PUBLIC_COLUMNS =
@@ -66,7 +67,7 @@ function buildApplication(body) {
   if (!row.services.length) return { error: 'List at least one service you offer.' };
   if (row.portfolio_urls.length < 3) return { error: 'Upload at least 3 photos or videos of your work.' };
   if (!row.proof_urls.length) return { error: 'Upload proof of your services (license, certificate or business registration).' };
-  if (body.accepted_terms !== true) return { error: 'Please accept the BL Pro terms to apply.' };
+  if (body.accepted_terms !== true) return { error: 'Please accept the BL Pro Service Addendum.' };
   return { row };
 }
 
@@ -141,6 +142,15 @@ async function apply(req, res) {
   const { row, error: invalid } = buildApplication(req.body || {});
   if (invalid) return res.status(400).json({ error: invalid });
 
+  let identity = null;
+  if (terms.clientOnCurrentAgreements(req)) {
+    if (req.body.accepted_provider_terms !== true) {
+      return res.status(400).json({ error: 'Please accept the Business and Provider Agreement.' });
+    }
+    identity = terms.providerIdentity(req.body || {});
+    if (identity.error) return res.status(400).json({ error: identity.error });
+  }
+
   const { data: existing } = await supabase
     .from('bl_pros')
     .select('id, status')
@@ -154,6 +164,15 @@ async function apply(req, res) {
     rejection_reason: null,
     terms_accepted_at: now,
     updated_at: now,
+    ...(identity
+      ? {
+          ...terms.termsAcceptanceFields(terms.TERMS_VERSION),
+          legal_name: identity.legal_name,
+          entity_type: identity.entity_type,
+          signer_name: identity.signer_name,
+          signer_title: identity.signer_title,
+        }
+      : {}),
   };
 
   if (existing && existing.status === 'approved') {
@@ -161,16 +180,36 @@ async function apply(req, res) {
   }
 
   const { data, error } = existing
-    ? await supabase.from('bl_pros').update(payload).eq('id', existing.id).select().single()
-    : await supabase
-        .from('bl_pros')
-        .insert({ ...payload, user_id: req.user.id })
-        .select()
-        .single();
+    ? await terms.writeStripping(
+        (next) => supabase.from('bl_pros').update(next).eq('id', existing.id).select().single(),
+        payload
+      )
+    : await terms.writeStripping(
+        (next) => supabase.from('bl_pros').insert({ ...next, user_id: req.user.id }).select().single(),
+        payload
+      );
 
   if (error) {
     logger.error('BL Pro application failed', { userId: req.user.id, error: error.message });
     return res.status(400).json({ error: error.message });
+  }
+  if (identity) {
+    await terms.recordAcceptance(req.user.id, {
+      agreementId: 'business',
+      checkboxText: terms.CHECKBOX.business,
+      signerName: identity.signer_name,
+      providerLegalName: identity.legal_name,
+      entityType: identity.entity_type,
+      signerTitle: identity.signer_title,
+    });
+    await terms.recordAcceptance(req.user.id, {
+      agreementId: 'pro',
+      checkboxText: terms.CHECKBOX.pro,
+      signerName: identity.signer_name,
+      providerLegalName: identity.legal_name,
+      entityType: identity.entity_type,
+      signerTitle: identity.signer_title,
+    });
   }
   await notifyAdminsOfApplication(data, !!existing);
   res.status(existing ? 200 : 201).json({ pro: data, resubmitted: !!existing });
