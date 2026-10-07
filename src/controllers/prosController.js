@@ -3,13 +3,15 @@ const logger = require('../config/logger');
 const notificationService = require('../services/notificationService');
 const qaService = require('../services/qaService');
 const { logAdminAction } = require('../utils/adminAudit');
-const terms = require('../utils/termsAcceptance');
 
 const FOUNDING_CAPACITY = 100;
 const PUBLIC_COLUMNS =
   'id, display_name, profession, bio, city, state, country, phone, email, website, instagram_handle, ' +
   'years_experience, services, avatar_url, portfolio_urls, is_founding, founding_number, approved_at, created_at';
-const STATUSES = ['pending', 'approved', 'rejected', 'suspended'];
+const onboarding = require('../services/onboarding');
+const terms = require('../utils/termsAcceptance');
+
+const STATUSES = ['pending', 'needs_information', 'approved', 'rejected', 'suspended'];
 
 function safeSearchTerm(value) {
   return String(value || '')
@@ -37,7 +39,7 @@ function cleanServices(value) {
 }
 
 /** Validates an application body; returns { row } or { error }. */
-function buildApplication(body) {
+function buildApplication(body, strict) {
   const row = {
     display_name: cleanText(body.display_name, 80),
     profession: cleanText(body.profession, 60),
@@ -57,17 +59,34 @@ function buildApplication(body) {
     avatar_url: cleanUrls([body.avatar_url], 1)[0] || null,
     portfolio_urls: cleanUrls(body.portfolio_urls, 12),
     proof_urls: cleanUrls(body.proof_urls, 6),
+    service_mode: ['online', 'in_person', 'both'].includes(body.service_mode) ? body.service_mode : null,
+    service_area: cleanText(body.service_area, 120),
+    payment_method: cleanText(body.payment_method, 160),
+    reference_contact: cleanText(body.reference_contact, 240),
   };
 
   if (!row.display_name || row.display_name.length < 2) return { error: 'Add your name or brand name.' };
   if (!row.profession || row.profession.length < 2) return { error: 'Tell us your profession.' };
   if (!row.bio || row.bio.length < 30) return { error: 'Your bio should be at least 30 characters.' };
   if (!row.city) return { error: 'Add the city you work in.' };
-  if (!row.phone && !row.email) return { error: 'Add a phone number or email so members can reach you.' };
   if (!row.services.length) return { error: 'List at least one service you offer.' };
-  if (row.portfolio_urls.length < 3) return { error: 'Upload at least 3 photos or videos of your work.' };
-  if (!row.proof_urls.length) return { error: 'Upload proof of your services (license, certificate or business registration).' };
   if (body.accepted_terms !== true) return { error: 'Please accept the BL Pro Service Addendum.' };
+  const hasEvidence =
+    row.portfolio_urls.length >= 1 || row.proof_urls.length >= 1 || (row.reference_contact || '').length >= 5;
+  if (strict) {
+    if (!row.phone) return { error: 'Add a phone number.' };
+    if (!row.email) return { error: 'Add an email.' };
+    if (!row.service_mode) return { error: 'Say whether you work online, in person, or both.' };
+    if (!row.service_area) return { error: 'Add the area you serve.' };
+    if (!row.payment_method) return { error: 'Say how customers pay you directly.' };
+    if (!hasEvidence) {
+      return { error: 'Add one example: a photo or video of your work, a qualification, or a reference we can check.' };
+    }
+  } else {
+    if (!row.phone && !row.email) return { error: 'Add a phone number or email so members can reach you.' };
+    if (row.portfolio_urls.length < 3) return { error: 'Upload at least 3 photos or videos of your work.' };
+    if (!row.proof_urls.length) return { error: 'Upload proof of your services (license, certificate or business registration).' };
+  }
   return { row };
 }
 
@@ -126,20 +145,31 @@ async function getMy(req, res) {
 }
 
 async function getById(req, res) {
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('bl_pros')
-    .select(`${PUBLIC_COLUMNS}, status, user_id`)
+    .select(`${PUBLIC_COLUMNS}, status, user_id, credential_expires_at`)
     .eq('id', req.params.id)
     .maybeSingle();
+  if (error && /credential_expires_at/.test(error.message || '')) {
+    ({ data, error } = await supabase
+      .from('bl_pros')
+      .select(`${PUBLIC_COLUMNS}, status, user_id`)
+      .eq('id', req.params.id)
+      .maybeSingle());
+  }
   if (error) return res.status(400).json({ error: error.message });
   const isOwner = data && req.user?.id === data.user_id;
   if (!data || (data.status !== 'approved' && !isOwner)) return res.status(404).json({ error: 'BL Pro not found' });
   const { user_id: _userId, ...pro } = data;
+  pro.badges = await onboarding.publicBadges('pro', data.id);
+  if (pro.credential_expires_at && new Date(pro.credential_expires_at).getTime() < Date.now() && pro.status === 'approved') {
+    return res.status(404).json({ error: 'BL Pro not found' });
+  }
   res.json(pro);
 }
 
 async function apply(req, res) {
-  const { row, error: invalid } = buildApplication(req.body || {});
+  const { row, error: invalid } = buildApplication(req.body || {}, terms.clientOnCurrentAgreements(req));
   if (invalid) return res.status(400).json({ error: invalid });
 
   let identity = null;
@@ -163,6 +193,7 @@ async function apply(req, res) {
     status: 'pending',
     rejection_reason: null,
     terms_accepted_at: now,
+    info_request: null,
     updated_at: now,
     ...(identity
       ? {
@@ -280,6 +311,15 @@ async function adminApprove(req, res) {
     .eq('id', req.params.id)
     .maybeSingle();
   if (!existing) return res.status(404).json({ error: 'BL Pro not found' });
+
+  const { data: professionRow } = await supabase.from('bl_pros').select('profession').eq('id', existing.id).maybeSingle();
+  const blocked = await onboarding.categoryBlock({
+    appliesTo: 'pro',
+    categoryName: professionRow?.profession,
+    entityType: 'pro',
+    entityId: existing.id,
+  });
+  if (blocked) return res.status(400).json({ error: blocked });
 
   const now = new Date().toISOString();
   const patch = {
@@ -415,6 +455,115 @@ async function membersFoundingWall(req, res) {
   });
 }
 
+async function adminNeedsInfo(req, res) {
+  const reason = String(req.body.reason || '').trim().slice(0, 500);
+  if (reason.length < 5) return res.status(400).json({ error: 'Tell them what to add or correct.' });
+  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from('bl_pros')
+    .update({ status: 'needs_information', info_request: reason, updated_at: now, reviewed_at: now, reviewed_by: req.user.id })
+    .eq('id', req.params.id)
+    .select('id, user_id, display_name')
+    .maybeSingle();
+  if (error) return res.status(400).json({ error: error.message });
+  if (!data) return res.status(404).json({ error: 'BL Pro not found' });
+  if (data.user_id) {
+    await notificationService.createNotification({
+      userId: data.user_id,
+      title: 'BL Pro application needs information',
+      body: reason,
+      type: 'system',
+      data: { kind: 'pro_application' },
+    }).catch(() => null);
+  }
+  await qaService.recordReview({
+    entityType: 'pro',
+    entityId: data.id,
+    reviewerId: req.user.id,
+    outcome: 'note',
+    notes: reason,
+  });
+  res.json(data);
+}
+
+async function requestVerification(req, res) {
+  const checkType = String(req.body.check_type || '');
+  const allowed = req.body.entity_type === 'business'
+    ? ['ownership', 'credential', 'portfolio']
+    : ['identity', 'credential', 'portfolio'];
+  if (!allowed.includes(checkType)) return res.status(400).json({ error: 'That check is not available for this application.' });
+
+  let entityId = null;
+  const entityType = req.body.entity_type === 'business' ? 'business' : 'pro';
+  if (entityType === 'pro') {
+    const { data } = await supabase.from('bl_pros').select('id, status').eq('user_id', req.user.id).maybeSingle();
+    if (!data || data.status !== 'approved') return res.status(400).json({ error: 'Optional checks open after basic approval.' });
+    entityId = data.id;
+  } else {
+    const { data } = await supabase.from('businesses').select('id, is_approved').eq('owner_id', req.user.id).limit(1).maybeSingle();
+    if (!data || !data.is_approved) return res.status(400).json({ error: 'Optional checks open after basic approval.' });
+    entityId = data.id;
+  }
+
+  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from('verification_checks')
+    .upsert(
+      {
+        entity_type: entityType,
+        entity_id: entityId,
+        check_type: checkType,
+        status: 'pending',
+        reviewer_id: null,
+        reviewed_at: null,
+        result_note: null,
+        source: null,
+      },
+      { onConflict: 'entity_type,entity_id,check_type' }
+    )
+    .select()
+    .single();
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({
+    check: data,
+    message: 'Request received. Uploading an ID does not award a badge. A reviewer records the result after the check.',
+    requested_at: now,
+  });
+}
+
+async function adminUpdateVerification(req, res) {
+  const status = String(req.body.status || '');
+  if (!['completed', 'unsuccessful', 'needs_information', 'expired'].includes(status)) {
+    return res.status(400).json({ error: 'Unknown verification result.' });
+  }
+  const resultNote = String(req.body.result_note || '').trim().slice(0, 500);
+  if (status === 'completed' && resultNote.length < 5) {
+    return res.status(400).json({ error: 'Describe what was checked and when. That note is what the badge shows.' });
+  }
+  const now = new Date().toISOString();
+  const patch = {
+    status,
+    reviewer_id: req.user.id,
+    reviewed_at: now,
+    source: String(req.body.source || '').trim().slice(0, 160) || null,
+    result_note: resultNote || null,
+    expires_at: req.body.expires_at || null,
+  };
+  const { data, error } = await supabase
+    .from('verification_checks')
+    .update(patch)
+    .eq('id', req.params.id)
+    .select()
+    .maybeSingle();
+  if (error) return res.status(400).json({ error: error.message });
+  if (!data) return res.status(404).json({ error: 'Verification check not found' });
+  if (data.check_type === 'credential' && data.expires_at) {
+    const table = data.entity_type === 'business' ? 'businesses' : 'bl_pros';
+    await supabase.from(table).update({ credential_expires_at: data.expires_at }).eq('id', data.entity_id);
+  }
+  res.json(data);
+}
+
 module.exports = {
   list,
   foundingWall,
@@ -424,6 +573,9 @@ module.exports = {
   adminList,
   adminApprove,
   adminReject,
+  adminNeedsInfo,
+  requestVerification,
+  adminUpdateVerification,
   adminQaReviews,
   membersFoundingWall,
 };

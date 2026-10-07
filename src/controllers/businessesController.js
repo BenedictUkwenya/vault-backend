@@ -5,6 +5,7 @@ const membership = require('../services/membershipService');
 const notificationService = require('../services/notificationService');
 const { timezoneForCountry } = require('../utils/timezone');
 const terms = require('../utils/termsAcceptance');
+const onboarding = require('../services/onboarding');
 const { termsAcceptanceFields, writeWithTermsFallback } = terms;
 
 /** Votes are keyed to the UTC month, matching the business_votes.vote_month unique index. */
@@ -124,7 +125,10 @@ async function getById(req, res) {
     return res.status(404).json({ error: 'Business not found' });
   }
 
-  // Views are recorded separately on screen focus (POST /:id/view)
+  data.badges = await onboarding.publicBadges('business', data.id);
+  if (data.credential_expires_at && new Date(data.credential_expires_at).getTime() < Date.now() && !isOwnerOrAdmin) {
+    return res.status(404).json({ error: 'Business not found' });
+  }
   res.json(data);
 }
 
@@ -266,6 +270,29 @@ async function register(req, res) {
     category_other,
   } = req.body;
 
+  const serviceMode = ['online', 'in_person', 'both'].includes(req.body.service_mode) ? req.body.service_mode : null;
+  const paymentMethod = String(req.body.payment_method || '').trim().slice(0, 160);
+  const serviceArea = String(req.body.service_area || '').trim().slice(0, 120);
+  const evidenceNote = String(req.body.evidence_note || '').trim().slice(0, 500);
+  if (terms.clientOnCurrentAgreements(req)) {
+    if (!phone) return res.status(400).json({ error: 'Add a phone number.' });
+    if (!serviceMode) return res.status(400).json({ error: 'Say whether you operate online, in person, or both.' });
+    if (!serviceArea) return res.status(400).json({ error: 'Add the area you serve.' });
+    if (!paymentMethod) return res.status(400).json({ error: 'Say how customers pay you directly.' });
+    const hasEvidence = Boolean(
+      String(website || '').trim() ||
+        String(instagram_handle || '').trim() ||
+        String(facebook_handle || '').trim() ||
+        String(tiktok_handle || '').trim() ||
+        evidenceNote.length >= 5
+    );
+    if (!hasEvidence) {
+      return res.status(400).json({
+        error: 'Add one source that shows the business operates: a social page, website, market, or a short note with photos of your setup.',
+      });
+    }
+  }
+
   const { data, error } = await writeWithTermsFallback(
     (row) =>
       writeWithCategoryOtherFallback((r) => supabase.from('businesses').insert(r).select().single(), row),
@@ -292,6 +319,10 @@ async function register(req, res) {
       timezone: timezoneForCountry(country),
       is_approved: false,
       review_status: 'pending',
+      service_mode: serviceMode,
+      service_area: serviceArea || null,
+      payment_method: paymentMethod || null,
+      evidence_note: evidenceNote || null,
       ...termsAcceptanceFields(terms.versionFor(req)),
       ...(identity
         ? {
@@ -392,11 +423,18 @@ async function updateMy(req, res) {
   if (!current) return res.status(404).json({ error: 'Business not found' });
 
   // Editing after a rejection resubmits the application for review.
-  const resubmitted = current.review_status === 'rejected' && req.body.resubmit !== false;
-  if (resubmitted) updates.review_status = 'pending';
+  const resubmitted = ['rejected', 'needs_information'].includes(current.review_status) && req.body.resubmit !== false;
+  if (resubmitted) {
+    updates.review_status = 'pending';
+    updates.info_request = null;
+  }
 
-  const { data, error } = await writeWithCategoryOtherFallback(
-    (row) => supabase.from('businesses').update(row).eq('id', current.id).select().single(),
+  const { data, error } = await terms.writeStripping(
+    (row) =>
+      writeWithCategoryOtherFallback(
+        (next) => supabase.from('businesses').update(next).eq('id', current.id).select().single(),
+        row
+      ),
     { ...updates, updated_at: new Date().toISOString() }
   );
 

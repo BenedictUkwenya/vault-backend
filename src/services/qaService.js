@@ -3,20 +3,14 @@ const logger = require('../config/logger');
 
 const CHECKLISTS = {
   business: [
-    { key: 'owner_identity', label: 'Owner identity confirmed' },
-    { key: 'location', label: 'Address / location is real' },
-    { key: 'contact', label: 'Phone or email works' },
-    { key: 'listing_accurate', label: 'Listing and deals are accurate' },
-    { key: 'photos', label: 'Photos are genuine and appropriate' },
-    { key: 'standards', label: 'Meets Black Limitless quality standards' },
+    { key: 'consistent', label: 'Name, contact, category and description are consistent' },
+    { key: 'evidence', label: 'One credible source shows the business operates' },
+    { key: 'offer', label: 'The member offer is clear, or they can publish one after approval' },
   ],
   pro: [
-    { key: 'identity', label: 'Identity confirmed' },
-    { key: 'credentials', label: 'Licenses / certifications checked' },
-    { key: 'portfolio', label: 'Portfolio is their own work' },
-    { key: 'services', label: 'Services match their proof' },
-    { key: 'contact', label: 'Contact details work' },
-    { key: 'standards', label: 'Meets Black Limitless quality standards' },
+    { key: 'person', label: 'The person delivering the service is named' },
+    { key: 'evidence', label: 'One credible example, qualification or reference is present' },
+    { key: 'offer', label: 'The service description is clear' },
   ],
 };
 

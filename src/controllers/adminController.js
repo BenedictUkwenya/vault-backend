@@ -5,6 +5,7 @@ const notificationService = require('../services/notificationService');
 const { logAdminAction } = require('../utils/adminAudit');
 const { syncEffectiveTier } = require('../services/tierSync');
 const qaService = require('../services/qaService');
+const onboarding = require('../services/onboarding');
 
 const ROLES = ['user', 'business', 'ambassador', 'admin', 'super_admin'];
 const ADMIN_ROLES = ['admin', 'super_admin'];
@@ -299,7 +300,7 @@ async function listBusinesses(req, res) {
     .range(offset, offset + limit - 1)
     .order('created_at', { ascending: false });
 
-  if (['pending', 'approved', 'rejected', 'suspended'].includes(status)) {
+  if (['pending', 'needs_information', 'approved', 'rejected', 'suspended'].includes(status)) {
     query = query.eq('review_status', status);
   }
 
@@ -324,6 +325,19 @@ async function approveBusiness(req, res) {
 
   if (fetchError) return res.status(400).json({ error: fetchError.message });
   if (!existing) return res.status(404).json({ error: 'Business not found' });
+
+  const { data: named } = await supabase
+    .from('businesses')
+    .select('name, category:category_id(name)')
+    .eq('id', existing.id)
+    .maybeSingle();
+  const blocked = await onboarding.categoryBlock({
+    appliesTo: 'business',
+    categoryName: named?.category?.name,
+    entityType: 'business',
+    entityId: existing.id,
+  });
+  if (blocked) return res.status(400).json({ error: blocked });
 
   const now = new Date().toISOString();
   const patch = {
@@ -735,6 +749,77 @@ async function deleteUser(req, res) {
   res.json({ deleted: true, id, email: target.email });
 }
 
+async function needsInfoBusiness(req, res) {
+  const reason = String(req.body.reason || '').trim().slice(0, 500);
+  if (reason.length < 5) return res.status(400).json({ error: 'Tell them what to add or correct.' });
+  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from('businesses')
+    .update({
+      is_approved: false,
+      review_status: 'needs_information',
+      info_request: reason,
+      reviewed_at: now,
+      reviewed_by: req.user.id,
+      updated_at: now,
+    })
+    .eq('id', req.params.id)
+    .select('id, owner_id, name')
+    .maybeSingle();
+  if (error) return res.status(400).json({ error: error.message });
+  if (!data) return res.status(404).json({ error: 'Business not found' });
+  if (data.owner_id) {
+    await notificationService.createNotification({
+      userId: data.owner_id,
+      title: 'Your business application needs information',
+      body: reason,
+      type: 'system',
+      data: { kind: 'business_application', business_id: data.id },
+    }).catch(() => null);
+  }
+  await qaService.recordReview({
+    entityType: 'business',
+    entityId: data.id,
+    reviewerId: req.user.id,
+    outcome: 'note',
+    notes: reason,
+  });
+  res.json(data);
+}
+
+async function listCategoryRules(_req, res) {
+  const { data, error } = await supabase.from('service_category_rules').select('*').order('category_name');
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ rules: data || [] });
+}
+
+async function saveCategoryRule(req, res) {
+  const categoryName = String(req.body.category_name || '').trim().slice(0, 80);
+  const appliesTo = ['business', 'pro', 'both'].includes(req.body.applies_to) ? req.body.applies_to : '';
+  if (categoryName.length < 2 || !appliesTo) {
+    return res.status(400).json({ error: 'Name the category and whether the rule applies to businesses, pros, or both.' });
+  }
+  const row = {
+    category_name: categoryName,
+    applies_to: appliesTo,
+    requires_credential: req.body.requires_credential !== false,
+    credential_name: String(req.body.credential_name || '').trim().slice(0, 120) || null,
+  };
+  const { data, error } = await supabase
+    .from('service_category_rules')
+    .upsert(row, { onConflict: 'category_name,applies_to' })
+    .select()
+    .single();
+  if (error) return res.status(400).json({ error: error.message });
+  res.json(data);
+}
+
+async function deleteCategoryRule(req, res) {
+  const { error } = await supabase.from('service_category_rules').delete().eq('id', req.params.id);
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ deleted: true });
+}
+
 module.exports = {
   stats,
   analyticsOverview,
@@ -746,6 +831,10 @@ module.exports = {
   listBusinesses,
   approveBusiness,
   rejectBusiness,
+  needsInfoBusiness,
+  listCategoryRules,
+  saveCategoryRule,
+  deleteCategoryRule,
   listDeals,
   approveDeal,
   rejectDeal,

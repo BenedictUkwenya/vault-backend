@@ -96,8 +96,8 @@ async function badges(req, res) {
   let admin = null;
   if (isAdmin) {
     const [pros, businesses, network] = await Promise.all([
-      headCount(supabase.from('bl_pros').select('id', { count: 'exact', head: true }).eq('status', 'pending')),
-      headCount(supabase.from('businesses').select('id', { count: 'exact', head: true }).eq('review_status', 'pending')),
+      headCount(supabase.from('bl_pros').select('id', { count: 'exact', head: true }).in('status', ['pending', 'needs_information'])),
+      headCount(supabase.from('businesses').select('id', { count: 'exact', head: true }).in('review_status', ['pending', 'needs_information'])),
       headCount(
         supabase.from('network_applications').select('id', { count: 'exact', head: true }).eq('status', 'pending')
       ),
