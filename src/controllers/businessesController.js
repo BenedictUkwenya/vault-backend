@@ -274,6 +274,12 @@ async function register(req, res) {
   const paymentMethod = String(req.body.payment_method || '').trim().slice(0, 160);
   const serviceArea = String(req.body.service_area || '').trim().slice(0, 120);
   const evidenceNote = String(req.body.evidence_note || '').trim().slice(0, 500);
+  const evidenceUrls = Array.isArray(req.body.evidence_urls)
+    ? req.body.evidence_urls
+        .filter((u) => typeof u === 'string' && /^https:\/\//i.test(u.trim()))
+        .map((u) => u.trim().slice(0, 600))
+        .slice(0, 6)
+    : [];
   if (terms.clientOnCurrentAgreements(req)) {
     if (!phone) return res.status(400).json({ error: 'Add a phone number.' });
     if (!serviceMode) return res.status(400).json({ error: 'Say whether you operate online, in person, or both.' });
@@ -284,7 +290,8 @@ async function register(req, res) {
         String(instagram_handle || '').trim() ||
         String(facebook_handle || '').trim() ||
         String(tiktok_handle || '').trim() ||
-        evidenceNote.length >= 5
+        evidenceNote.length >= 5 ||
+        evidenceUrls.length > 0
     );
     if (!hasEvidence) {
       return res.status(400).json({
@@ -323,6 +330,7 @@ async function register(req, res) {
       service_area: serviceArea || null,
       payment_method: paymentMethod || null,
       evidence_note: evidenceNote || null,
+      ...(evidenceUrls.length ? { evidence_urls: evidenceUrls } : {}),
       ...termsAcceptanceFields(terms.versionFor(req)),
       ...(identity
         ? {

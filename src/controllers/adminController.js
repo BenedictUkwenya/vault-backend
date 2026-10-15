@@ -307,7 +307,17 @@ async function listBusinesses(req, res) {
   const { data, error, count } = await query;
   if (error) return res.status(400).json({ error: error.message });
 
-  res.json({ businesses: data, total: count });
+  // The stats view predates the onboarding columns, so merge them from the table for reviewers.
+  const ids = (data || []).map((b) => b.id);
+  let extras = {};
+  if (ids.length) {
+    const { data: rows } = await supabase
+      .from('businesses')
+      .select('id, legal_name, phone, email, website, instagram_handle, service_area, service_mode, payment_method, evidence_note, evidence_urls, info_request')
+      .in('id', ids);
+    extras = Object.fromEntries((rows || []).map((r) => [r.id, r]));
+  }
+  res.json({ businesses: (data || []).map((b) => ({ ...b, ...(extras[b.id] || {}) })), total: count });
 }
 
 async function approveBusiness(req, res) {

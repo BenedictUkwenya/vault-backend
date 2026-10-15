@@ -14,5 +14,11 @@
       "src": "/(.*)",
       "dest": "src/index.js"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/credential-expiry",
+      "schedule": "0 14 * * *"
+    }
   ]
 }

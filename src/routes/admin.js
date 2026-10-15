@@ -40,6 +40,7 @@ router.get('/media', asyncHandler(mediaController.listAdmin));
 
 const prosController = require('../controllers/prosController');
 router.get('/pros', asyncHandler(prosController.adminList));
+router.get('/verifications', asyncHandler(prosController.adminListVerifications));
 router.get('/qa-reviews', asyncHandler(prosController.adminQaReviews));
 
 // Mutations require email verification token

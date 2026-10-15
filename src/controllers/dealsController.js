@@ -198,7 +198,13 @@ async function getById(req, res) {
     .single();
 
   if (error || !data) return res.status(404).json({ error: 'Deal not found' });
-  res.json(data);
+  // The deal view predates these columns, so read them from the table directly.
+  const { data: extra } = await supabase
+    .from('deals')
+    .select('exclusions, availability_note')
+    .eq('id', data.id)
+    .maybeSingle();
+  res.json({ ...data, ...(extra || {}) });
 }
 
 async function redeem(req, res) {
@@ -431,6 +437,14 @@ async function create(req, res) {
     terms, end_date, max_redemptions, is_college_deal, requires_paid_tier,
     image_url, images, original_price,
   } = req.body;
+  const exclusions = String(req.body.exclusions || '').trim().slice(0, 300);
+  const availabilityNote = String(req.body.availability_note || '').trim().slice(0, 300);
+  const maxRedemptions = max_redemptions === undefined || max_redemptions === null || max_redemptions === ''
+    ? null
+    : Number(max_redemptions);
+  if (maxRedemptions !== null && (!Number.isInteger(maxRedemptions) || maxRedemptions < 1)) {
+    return res.status(400).json({ error: 'Redemption limit must be a whole number of 1 or more.' });
+  }
 
   let normalizedEndDate;
   try {
@@ -462,7 +476,9 @@ async function create(req, res) {
     redemption_method: redemption_method || 'qr',
     terms,
     end_date: normalizedEndDate,
-    max_redemptions,
+    max_redemptions: maxRedemptions,
+    ...(exclusions ? { exclusions } : {}),
+    ...(availabilityNote ? { availability_note: availabilityNote } : {}),
     is_college_deal: is_college_deal || false,
     requires_paid_tier: requires_paid_tier || false,
     image_url: primaryImage,
@@ -537,7 +553,7 @@ async function update(req, res) {
   if (!current) return res.status(404).json({ error: 'Deal not found' });
 
   const allowed = ['title', 'description', 'discount_percentage', 'terms', 'end_date', 'original_price',
-    'max_redemptions', 'is_college_deal', 'requires_paid_tier', 'image_url', 'images', 'is_active'];
+    'max_redemptions', 'exclusions', 'availability_note', 'is_college_deal', 'requires_paid_tier', 'image_url', 'images', 'is_active'];
   const updates = {};
   for (const key of allowed) {
     if (req.body[key] !== undefined) updates[key] = req.body[key];

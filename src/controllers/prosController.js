@@ -505,6 +505,23 @@ async function requestVerification(req, res) {
     entityId = data.id;
   }
 
+  // A completed or in-progress check must not be reset by a repeat request.
+  const { data: current } = await supabase
+    .from('verification_checks')
+    .select('status, expires_at')
+    .eq('entity_type', entityType)
+    .eq('entity_id', entityId)
+    .eq('check_type', checkType)
+    .maybeSingle();
+  if (current) {
+    const lapsed = current.expires_at && new Date(current.expires_at).getTime() < Date.now();
+    if (current.status === 'pending') return res.status(409).json({ error: 'This check is already pending review.' });
+    if (current.status === 'needs_information') {
+      return res.status(409).json({ error: 'A reviewer asked for more information on this check. Reply to that request first.' });
+    }
+    if (current.status === 'completed' && !lapsed) return res.status(409).json({ error: 'This check is already completed.' });
+  }
+
   const now = new Date().toISOString();
   const { data, error } = await supabase
     .from('verification_checks')
@@ -518,6 +535,7 @@ async function requestVerification(req, res) {
         reviewed_at: null,
         result_note: null,
         source: null,
+        expires_at: null,
       },
       { onConflict: 'entity_type,entity_id,check_type' }
     )
@@ -528,6 +546,75 @@ async function requestVerification(req, res) {
     check: data,
     message: 'Request received. Uploading an ID does not award a badge. A reviewer records the result after the check.',
     requested_at: now,
+  });
+}
+
+async function myVerifications(req, res) {
+  const entityType = req.query.entity_type === 'business' ? 'business' : 'pro';
+  let entityId = null;
+  if (entityType === 'pro') {
+    const { data } = await supabase.from('bl_pros').select('id').eq('user_id', req.user.id).maybeSingle();
+    entityId = data?.id;
+  } else {
+    const { data } = await supabase.from('businesses').select('id').eq('owner_id', req.user.id).limit(1).maybeSingle();
+    entityId = data?.id;
+  }
+  if (!entityId) return res.json({ verifications: [] });
+  const { data, error } = await supabase
+    .from('verification_checks')
+    .select('id, entity_type, check_type, status, result_note, reviewed_at, expires_at, created_at')
+    .eq('entity_type', entityType)
+    .eq('entity_id', entityId);
+  if (error) return res.status(400).json({ error: error.message });
+  const now = Date.now();
+  const verifications = (data || []).map((row) => ({
+    ...row,
+    // Lapsed checks read as expired even before an admin touches them.
+    status: row.status === 'completed' && row.expires_at && new Date(row.expires_at).getTime() < now ? 'expired' : row.status,
+  }));
+  res.json({ verifications });
+}
+
+async function adminListVerifications(req, res) {
+  const status = String(req.query.status || 'pending');
+  const allowed = ['pending', 'needs_information', 'completed', 'unsuccessful', 'expired'];
+  if (!allowed.includes(status)) return res.status(400).json({ error: 'Unknown status.' });
+
+  const nowIso = new Date().toISOString();
+  let query = supabase
+    .from('verification_checks')
+    .select('id, entity_type, entity_id, check_type, status, source, result_note, reviewed_at, expires_at, created_at')
+    .order('created_at', { ascending: false })
+    .limit(100);
+  // "Expired" also covers completed checks whose date has passed.
+  if (status === 'expired') {
+    query = query.or(`status.eq.expired,and(status.eq.completed,expires_at.lt.${nowIso})`);
+  } else if (status === 'completed') {
+    query = query.eq('status', 'completed').or(`expires_at.is.null,expires_at.gte.${nowIso}`);
+  } else {
+    query = query.eq('status', status);
+  }
+  const { data, error } = await query;
+  if (error) return res.status(400).json({ error: error.message });
+
+  const rows = data || [];
+  const names = {};
+  const proIds = rows.filter((r) => r.entity_type === 'pro').map((r) => r.entity_id);
+  const bizIds = rows.filter((r) => r.entity_type === 'business').map((r) => r.entity_id);
+  if (proIds.length) {
+    const { data: pros } = await supabase.from('bl_pros').select('id, display_name').in('id', proIds);
+    (pros || []).forEach((p) => { names[p.id] = p.display_name; });
+  }
+  if (bizIds.length) {
+    const { data: biz } = await supabase.from('businesses').select('id, name').in('id', bizIds);
+    (biz || []).forEach((b) => { names[b.id] = b.name; });
+  }
+  res.json({
+    verifications: rows.map((r) => ({
+      ...r,
+      subject_name: names[r.entity_id] || null,
+      requested_at: r.created_at,
+    })),
   });
 }
 
@@ -575,6 +662,8 @@ module.exports = {
   adminReject,
   adminNeedsInfo,
   requestVerification,
+  myVerifications,
+  adminListVerifications,
   adminUpdateVerification,
   adminQaReviews,
   membersFoundingWall,
