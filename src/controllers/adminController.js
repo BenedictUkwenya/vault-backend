@@ -143,7 +143,7 @@ async function getUser(req, res) {
   const { data: user, error } = await supabase.from('profiles').select('*').eq('id', id).single();
   if (error || !user) return res.status(404).json({ error: 'User not found' });
 
-  const [bookings, redemptions, business] = await Promise.all([
+  const [bookings, redemptions, business, referral] = await Promise.all([
     supabase.from('bookings').select('id', { count: 'exact', head: true }).eq('user_id', id),
     supabase.from('redemptions').select('id', { count: 'exact', head: true }).eq('user_id', id),
     supabase
@@ -152,10 +152,17 @@ async function getUser(req, res) {
       .eq('owner_id', id)
       .order('created_at', { ascending: false })
       .limit(1),
+    supabase
+      .from('referrals')
+      .select('referrer:referrer_id(id, full_name, email, referral_code)')
+      .eq('referred_id', id)
+      .order('created_at', { ascending: true })
+      .limit(1),
   ]);
 
   res.json({
     ...user,
+    referred_by: referral.data?.[0]?.referrer || null,
     bookings_count: bookings.count || 0,
     redemptions_count: redemptions.count || 0,
     business: business.data?.[0] || null,

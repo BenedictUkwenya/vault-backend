@@ -89,10 +89,21 @@ async function getStatus(req, res) {
 }
 
 /** Only redirect back to our own web app or the mobile app's deep-link schemes. */
-function safeReturnUrl(url, fallback) {
+const DEFAULT_SITE = 'https://www.blacklimitless.com';
+
+/** FRONTEND_URL may be missing or scheme-less on a deployment; Stripe needs an absolute URL. */
+function siteUrl() {
+  const raw = String(process.env.FRONTEND_URL || '').trim().replace(/\/+$/, '');
+  return /^https?:\/\/[^/]+/i.test(raw) ? raw : DEFAULT_SITE;
+}
+
+function safeReturnUrl(url, fallbackPath) {
+  const fallback = `${siteUrl()}${fallbackPath}`;
   if (!url || typeof url !== 'string') return fallback;
-  const allowed = [process.env.FRONTEND_URL, 'blacklimitless://', 'exp://', 'exps://'].filter(Boolean);
-  return allowed.some((prefix) => url.startsWith(prefix)) ? url : fallback;
+  // Expo builds app links as "blacklimitless:///membership"; Stripe rejects the empty host.
+  const normalized = url.replace(/^([a-z][a-z0-9+.-]*):\/\/\/+/i, '$1://');
+  const allowed = [siteUrl(), 'blacklimitless://', 'exp://', 'exps://'];
+  return allowed.some((prefix) => normalized.startsWith(prefix)) ? normalized : fallback;
 }
 
 async function createCheckout(req, res) {
@@ -159,8 +170,8 @@ async function createCheckout(req, res) {
   const session = await stripeService.createCheckoutSession({
     customerId,
     priceId,
-    successUrl: safeReturnUrl(success_url, `${process.env.FRONTEND_URL}/membership?success=true`),
-    cancelUrl: safeReturnUrl(cancel_url, `${process.env.FRONTEND_URL}/membership?canceled=true`),
+    successUrl: safeReturnUrl(success_url, "/membership?success=true"),
+    cancelUrl: safeReturnUrl(cancel_url, "/membership?canceled=true"),
     userId: req.user.id,
     subscriptionType: checkoutType,
     trialPeriodDays: withTrial ? TRIAL_PERIOD_DAYS : undefined,
@@ -182,7 +193,7 @@ async function createPortalSession(req, res) {
 
   const session = await stripeService.createPortalSession(
     profile.stripe_customer_id,
-    safeReturnUrl(req.body.return_url, `${process.env.FRONTEND_URL}/membership`)
+    safeReturnUrl(req.body.return_url, "/membership")
   );
 
   res.json({ portal_url: session.url });
