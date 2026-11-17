@@ -42,6 +42,7 @@ const MEMBER_PLANS = [
     highlights: [
       'Everything in Free',
       '10 discount redemptions per month',
+      'See new deals 12 hours before free members',
       'Student pricing (verified student account)',
       'Discounted entry to Black Limitless hosted events',
       'Participate in Passport rewards',
@@ -59,6 +60,7 @@ const MEMBER_PLANS = [
     highlights: [
       'Everything in Student',
       '25 discount redemptions per month',
+      'See new deals 12 hours before free members',
       'Access to all standard business discounts',
       'Free entry to all Black Limitless hosted events',
       'Participate in Passport rewards',
@@ -78,7 +80,7 @@ const MEMBER_PLANS = [
       'Free entry plus a guest to all Black Limitless hosted events',
       'Exclusive VIP-only offers',
       'Monthly giveaway entry',
-      'Early access to new deals (24 hours before everyone)',
+      'See new deals the moment they drop',
       'Priority customer support',
       'VIP profile badge',
     ],
@@ -96,6 +98,7 @@ const BUSINESS_PLAN = {
     'Business profile in the app',
     '25% discount listing',
     'Access to all Member discounts while subscribed',
+    'See new deals the moment they drop',
     'Ability to promote business information',
     'Free entry to Black Limitless hosted events',
     'Event promotion consideration',
@@ -117,6 +120,7 @@ const PRO_PLAN = {
   highlights: [
     'BL Pro profile in the app',
     'Access to all Member discounts while subscribed',
+    'See new deals the moment they drop',
     'Ability to promote your services',
     'Free entry to Black Limitless hosted events',
     'Event promotion consideration',
