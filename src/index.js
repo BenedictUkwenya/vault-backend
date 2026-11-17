@@ -71,20 +71,38 @@ app.use(morgan('combined', {
 }));
 
 // ── Rate limiting ─────────────────────────────────────────────────────────────
+// Mobile carriers and VPNs put many people behind one IP, so signed-in traffic is limited per
+// account and only a generous ceiling applies per IP. One app screen makes several requests at once.
+const crypto = require('crypto');
+function accountKey(req) {
+  const auth = req.headers.authorization || '';
+  if (auth.startsWith('Bearer ') && auth.length > 20) {
+    return 'acct:' + crypto.createHash('sha256').update(auth.slice(7)).digest('hex').slice(0, 32);
+  }
+  return 'ip:' + req.ip;
+}
+const skipAnalytics = (req) => req.path.startsWith('/analytics/'); // analytics has its own limiter
 const limiter = createLimiter('api', {
   windowMs: 15 * 60 * 1000, // 15 min
-  max: 200,
+  max: 1500,
+  keyGenerator: accountKey,
   standardHeaders: true,
   legacyHeaders: false,
-  // Analytics has its own limiter so event batches don't eat into app API quota.
-  skip: (req) => req.path.startsWith('/analytics/'),
+  skip: skipAnalytics,
+});
+const ipCeiling = createLimiter('api-ip', {
+  windowMs: 15 * 60 * 1000,
+  max: 6000,
+  standardHeaders: false,
+  legacyHeaders: false,
+  skip: skipAnalytics,
 });
 const authLimiter = createLimiter('auth', {
   windowMs: 15 * 60 * 1000,
   max: 20,
   message: { error: 'Too many auth attempts, please try again later.' },
 });
-app.use('/api/', limiter);
+app.use('/api/', ipCeiling, limiter);
 app.use('/api/auth/', authLimiter);
 
 // ── Health ────────────────────────────────────────────────────────────────────
