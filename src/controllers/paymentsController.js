@@ -5,6 +5,7 @@ const referralService = require('../services/referralService');
 const membership = require('../services/membershipService');
 const notificationService = require('../services/notificationService');
 const { syncEffectiveTier } = require('../services/tierSync');
+const { grantFounding } = require('../services/foundingService');
 
 async function webhook(req, res) {
   const sig = req.headers['stripe-signature'];
@@ -141,6 +142,7 @@ async function handleSubscriptionUpsert(sub) {
   }
   // Every plan sets the member tier: provider plans include Member discount access.
   await syncEffectiveTier(profile.id);
+  if (isActive && providerType) await grantFounding(providerType, profile.id);
   if (isActive && !providerType) {
     await supabase.from('profiles').update({ preferred_membership_tier: null }).eq('id', profile.id);
   }

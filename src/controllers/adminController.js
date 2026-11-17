@@ -366,27 +366,7 @@ async function approveBusiness(req, res) {
     updated_at: now,
   };
 
-  // First 100 approved partners get Founding Member status. Use the smallest free
-  // number so backfill gaps don't collide with the unique index and fail approval.
-  if (!existing.is_founding_member) {
-    const { data: taken } = await supabase
-      .from('businesses')
-      .select('founding_member_number')
-      .eq('is_founding_member', true)
-      .not('founding_member_number', 'is', null);
-    const used = new Set((taken || []).map((r) => r.founding_member_number));
-    let next = null;
-    for (let n = 1; n <= 100; n += 1) {
-      if (!used.has(n)) {
-        next = n;
-        break;
-      }
-    }
-    if (next) {
-      patch.is_founding_member = true;
-      patch.founding_member_number = next;
-    }
-  }
+  // The Founding badge is earned by subscribing to the Founding Business plan (foundingService).
 
   let { data, error } = await supabase
     .from('businesses')

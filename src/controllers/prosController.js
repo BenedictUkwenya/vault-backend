@@ -330,10 +330,7 @@ async function adminApprove(req, res) {
     reviewed_by: req.user.id,
     updated_at: now,
   };
-  if (!existing.is_founding) {
-    const next = await nextFoundingNumber();
-    if (next) Object.assign(patch, { is_founding: true, founding_number: next });
-  }
+  // The Founding badge is earned by subscribing to the BL Pro plan (foundingService).
 
   let { data, error } = await supabase.from('bl_pros').update(patch).eq('id', existing.id).select().single();
   if (error && error.code === '23505' && patch.founding_number) {
@@ -355,10 +352,10 @@ async function adminApprove(req, res) {
   await notificationService
     .createNotification({
       userId: existing.user_id,
-      title: "You're a verified BL Pro 🎉",
+      title: "You're an approved BL Pro 🎉",
       body: data.is_founding
         ? `Welcome, Founding BL Pro #${data.founding_number}. Your profile is now live for members.`
-        : 'Your BL Pro profile is now live for members.',
+        : 'Your BL Pro profile is now live. Subscribe to the BL Pro plan to claim a Founding BL Pro badge while places last.',
       type: 'system',
       data: { kind: 'pro_approved', pro_id: existing.id },
     })

@@ -100,7 +100,7 @@ const BUSINESS_PLAN = {
     'Free entry to Black Limitless hosted events',
     'Event promotion consideration',
     'Included in Black Limitless marketing opportunities',
-    'Founding Business Badge (first 100 only)',
+    'Founding Business Badge (first 100 subscribers)',
     'Permanent placement on the Founding Business Wall',
   ],
 };
@@ -121,7 +121,7 @@ const PRO_PLAN = {
     'Free entry to Black Limitless hosted events',
     'Event promotion consideration',
     'Included in Black Limitless marketing opportunities',
-    'Founding Pro Badge (first 100 only)',
+    'Founding Pro Badge (first 100 subscribers)',
     'Permanent placement on the Founding Pro Wall',
   ],
 };
