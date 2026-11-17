@@ -241,7 +241,17 @@ async function getById(req, res) {
     .select('exclusions, availability_note')
     .eq('id', data.id)
     .maybeSingle();
-  res.json({ ...data, ...(extra || {}) });
+  let redemptionsLeft = null;
+  if (data.max_redemptions) {
+    // Same count the redeem check uses: scanned redemptions plus unexpired, unscanned QR codes.
+    const cutoff = new Date(Date.now() - PENDING_QR_TTL_MS).toISOString();
+    const [verifiedRes, pendingRes] = await Promise.all([
+      supabase.from('redemptions').select('id', { count: 'exact', head: true }).eq('deal_id', data.id).not('verified_at', 'is', null),
+      supabase.from('redemptions').select('id', { count: 'exact', head: true }).eq('deal_id', data.id).is('verified_at', null).gte('redeemed_at', cutoff),
+    ]);
+    redemptionsLeft = Math.max(0, data.max_redemptions - (verifiedRes.count || 0) - (pendingRes.count || 0));
+  }
+  res.json({ ...data, ...(extra || {}), redemptions_left: redemptionsLeft });
 }
 
 async function redeem(req, res) {
