@@ -14,5 +14,6 @@ const aiLimiter = createLimiter('ai', {
 });
 
 router.post('/chat', authenticate, aiLimiter, asyncHandler(aiController.chat));
+router.post('/deal-draft', authenticate, aiLimiter, asyncHandler(aiController.draftDeal));
 
 module.exports = router;
