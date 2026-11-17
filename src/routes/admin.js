@@ -30,6 +30,7 @@ router.get('/analytics', asyncHandler(adminController.analyticsOverview));
 router.get('/users', asyncHandler(adminController.listUsers));
 router.get('/users/:id', asyncHandler(adminController.getUser));
 router.get('/businesses', asyncHandler(adminController.listBusinesses));
+router.get('/businesses/:id', asyncHandler(require('../controllers/adminBusinessController').getBusiness));
 router.get('/category-rules', asyncHandler(adminController.listCategoryRules));
 router.get('/deals', asyncHandler(adminController.listDeals));
 router.get('/locations', asyncHandler(locationsController.list));
