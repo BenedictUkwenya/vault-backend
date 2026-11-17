@@ -7,6 +7,34 @@ const terms = require('../utils/termsAcceptance');
 const passportService = require('../services/passportService');
 const notificationService = require('../services/notificationService');
 
+/** VIP early access: everyone else sees a new deal this long after it is created. */
+const EARLY_ACCESS_MS = 24 * 60 * 60 * 1000;
+const NO_CUTOFF = '9999-12-31T00:00:00.000Z';
+
+function seesEarlyDeals(req) {
+  const p = req.profile;
+  if (!p) return false;
+  if (['admin', 'super_admin'].includes(p.role)) return true;
+  return membership.isVip(membership.effectiveTier(p));
+}
+
+/** Latest created_at this viewer may see. VIPs and admins see everything. */
+function earlyCutoff(req) {
+  return seesEarlyDeals(req) ? NO_CUTOFF : new Date(Date.now() - EARLY_ACCESS_MS).toISOString();
+}
+
+function inEarlyAccess(deal, req) {
+  return !!deal?.created_at && deal.created_at > earlyCutoff(req);
+}
+
+function earlyAccessError(deal) {
+  const opens = new Date(new Date(deal.created_at).getTime() + EARLY_ACCESS_MS);
+  return {
+    error: `This deal is in VIP early access. It opens to everyone on ${opens.toUTCString().slice(0, 22)} UTC.`,
+    code: 'vip_early_access',
+  };
+}
+
 /** Unscanned QR codes stop counting (and stop verifying) after this long. */
 const PENDING_QR_TTL_MS = 48 * 60 * 60 * 1000;
 
@@ -52,6 +80,7 @@ async function list(req, res) {
     .eq('is_active', true)
     .eq('business_is_approved', true)
     .gt('end_date', new Date().toISOString())
+    .lte('created_at', earlyCutoff(req))
     .range(offset, offset + limit - 1);
 
   query = applyScopeFilters(query, { city, country, category_id });
@@ -76,6 +105,7 @@ async function dealsOfWeek(req, res) {
     .eq('business_is_approved', true)
     .eq('is_deal_of_week', true)
     .gt('end_date', new Date().toISOString())
+    .lte('created_at', earlyCutoff(req))
     .limit(10);
   query = applyScopeFilters(query, req.query);
 
@@ -94,6 +124,7 @@ async function dealsOfMonth(req, res) {
     .eq('business_is_approved', true)
     .eq('is_deal_of_month', true)
     .gt('end_date', new Date().toISOString())
+    .lte('created_at', earlyCutoff(req))
     .limit(10);
   curatedQuery = applyScopeFilters(curatedQuery, req.query);
   const curated = await curatedQuery;
@@ -109,6 +140,7 @@ async function dealsOfMonth(req, res) {
     .eq('is_active', true)
     .eq('business_is_approved', true)
     .gt('end_date', new Date().toISOString())
+    .lte('created_at', earlyCutoff(req))
     .order('redemption_count', { ascending: false })
     .order('discount_percentage', { ascending: false })
     .limit(12);
@@ -128,6 +160,7 @@ async function collegeDeals(req, res) {
       .eq('business_is_approved', true)
       .eq('is_college_deal', true)
       .gt('end_date', new Date().toISOString())
+    .lte('created_at', earlyCutoff(req))
       .limit(20),
     req.query
   );
@@ -144,6 +177,7 @@ async function recentDeals(req, res) {
     .eq('is_active', true)
     .eq('business_is_approved', true)
     .gt('end_date', new Date().toISOString())
+    .lte('created_at', earlyCutoff(req))
     .order('created_at', { ascending: false })
     .limit(20);
   query = applyScopeFilters(query, req.query);
@@ -160,6 +194,7 @@ async function popularDeals(req, res) {
     .eq('is_active', true)
     .eq('business_is_approved', true)
     .gt('end_date', new Date().toISOString())
+    .lte('created_at', earlyCutoff(req))
     .order('redemption_count', { ascending: false })
     .order('discount_percentage', { ascending: false })
     .limit(15);
@@ -179,6 +214,7 @@ async function eventDeals(req, res) {
       .eq('business_is_approved', true)
       .eq('deal_type', 'entertainment')
       .gt('end_date', new Date().toISOString())
+    .lte('created_at', earlyCutoff(req))
       .order('created_at', { ascending: false })
       .limit(15),
     req.query
@@ -198,6 +234,7 @@ async function getById(req, res) {
     .single();
 
   if (error || !data) return res.status(404).json({ error: 'Deal not found' });
+  if (inEarlyAccess(data, req)) return res.status(403).json(earlyAccessError(data));
   // The deal view predates these columns, so read them from the table directly.
   const { data: extra } = await supabase
     .from('deals')
@@ -219,6 +256,7 @@ async function redeem(req, res) {
 
   if (dealErr || !deal) return res.status(404).json({ error: 'Deal not found' });
   if (!deal.business_is_approved) return res.status(404).json({ error: 'Deal not found' });
+  if (inEarlyAccess(deal, req)) return res.status(403).json(earlyAccessError(deal));
   if (!deal.is_active) return res.status(400).json({ error: 'Deal is no longer active' });
   if (new Date(deal.end_date) < new Date()) return res.status(400).json({ error: 'Deal has expired' });
   if (deal.business_owner_id && deal.business_owner_id === userId) {

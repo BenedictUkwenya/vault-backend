@@ -75,7 +75,7 @@ const MEMBER_PLANS = [
       'Unlimited discount redemptions',
       'Exclusive VIP-only offers',
       'Monthly giveaway entry',
-      'Early access to new app features',
+      'Early access to new deals (24 hours before everyone)',
       'Priority customer support',
       'VIP profile badge',
     ],

@@ -41,6 +41,9 @@ router.get('/media', asyncHandler(mediaController.listAdmin));
 const prosController = require('../controllers/prosController');
 router.get('/pros', asyncHandler(prosController.adminList));
 router.get('/verifications', asyncHandler(prosController.adminListVerifications));
+const supportController = require('../controllers/supportController');
+router.get('/feedback', asyncHandler(supportController.adminListFeedback));
+router.get('/giveaways', asyncHandler(supportController.adminGiveaway));
 router.get('/qa-reviews', asyncHandler(prosController.adminQaReviews));
 
 // Mutations require email verification token
@@ -69,5 +72,7 @@ router.patch('/pros/:id/approve', asyncHandler(prosController.adminApprove));
 router.patch('/pros/:id/reject', asyncHandler(prosController.adminReject));
 router.patch('/pros/:id/needs-info', asyncHandler(prosController.adminNeedsInfo));
 router.patch('/verifications/:id', asyncHandler(prosController.adminUpdateVerification));
+router.patch('/feedback/:id', asyncHandler(supportController.adminUpdateFeedback));
+router.post('/giveaways/draw', asyncHandler(supportController.adminDrawGiveaway));
 
 module.exports = router;

@@ -46,6 +46,7 @@ function loadContext(userId) {
         .eq('is_active', true)
         .eq('business_is_approved', true)
         .gt('end_date', now)
+        .lte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
         .order('created_at', { ascending: false })
         .limit(CONTEXT_LIMIT)
     ),

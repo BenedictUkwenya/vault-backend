@@ -1,24 +1,24 @@
 const router = require('express').Router();
 const { body } = require('express-validator');
-const { authenticate, requireBusiness } = require('../middleware/auth');
+const { authenticate, optionalAuthenticate, requireBusiness } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
 const dealsController = require('../controllers/dealsController');
 
 // Public — specific routes before /:id
-router.get('/', asyncHandler(dealsController.list));
-router.get('/week', asyncHandler(dealsController.dealsOfWeek));
-router.get('/month', asyncHandler(dealsController.dealsOfMonth));
-router.get('/college', asyncHandler(dealsController.collegeDeals));
-router.get('/recent', asyncHandler(dealsController.recentDeals));
-router.get('/popular', asyncHandler(dealsController.popularDeals));
-router.get('/events', asyncHandler(dealsController.eventDeals));
+router.get('/', optionalAuthenticate, asyncHandler(dealsController.list));
+router.get('/week', optionalAuthenticate, asyncHandler(dealsController.dealsOfWeek));
+router.get('/month', optionalAuthenticate, asyncHandler(dealsController.dealsOfMonth));
+router.get('/college', optionalAuthenticate, asyncHandler(dealsController.collegeDeals));
+router.get('/recent', optionalAuthenticate, asyncHandler(dealsController.recentDeals));
+router.get('/popular', optionalAuthenticate, asyncHandler(dealsController.popularDeals));
+router.get('/events', optionalAuthenticate, asyncHandler(dealsController.eventDeals));
 router.get(
   '/:id/my-redemption',
   authenticate,
   asyncHandler(dealsController.getMyRedemption)
 );
 router.get('/:id/mine', authenticate, requireBusiness, asyncHandler(dealsController.getMine));
-router.get('/:id', asyncHandler(dealsController.getById));
+router.get('/:id', optionalAuthenticate, asyncHandler(dealsController.getById));
 
 // Auth required
 router.post(
