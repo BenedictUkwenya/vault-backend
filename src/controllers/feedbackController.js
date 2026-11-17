@@ -24,4 +24,16 @@ async function submit(req, res) {
   res.status(201).json(data);
 }
 
-module.exports = { submit };
+/** The signed-in member's messages, newest first, with any team reply. */
+async function mine(req, res) {
+  const { data, error } = await supabase
+    .from('feedback')
+    .select('id, category, message, rating, status, created_at, admin_reply, replied_at')
+    .eq('user_id', req.user.id)
+    .order('created_at', { ascending: false })
+    .limit(100);
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ messages: data || [] });
+}
+
+module.exports = { submit, mine };

@@ -7,33 +7,68 @@ async function adminListFeedback(req, res) {
   const status = req.query.status === 'resolved' ? 'resolved' : 'open';
   const { data, error } = await supabase
     .from('feedback')
-    .select('id, rating, category, message, is_priority, status, created_at, resolved_at, user:user_id(id, full_name, email, membership_tier)')
+    .select('id, rating, category, message, is_priority, status, created_at, resolved_at, admin_reply, replied_at, user:user_id(id, full_name, email, membership_tier)')
     .eq('status', status)
     .order('is_priority', { ascending: false })
     .order('created_at', { ascending: false })
     .limit(200);
   if (error) return res.status(400).json({ error: error.message });
 
-  const { count: priorityOpen } = await supabase
-    .from('feedback')
-    .select('id', { count: 'exact', head: true })
-    .eq('status', 'open')
-    .eq('is_priority', true);
-
-  res.json({ feedback: data || [], priority_open: priorityOpen || 0 });
+  const { data: all } = await supabase.from('feedback').select('status, is_priority, rating').limit(5000);
+  const rows = all || [];
+  const rated = rows.filter((r) => r.rating);
+  res.json({
+    feedback: data || [],
+    priority_open: rows.filter((r) => r.status === 'open' && r.is_priority).length,
+    stats: {
+      total: rows.length,
+      open: rows.filter((r) => r.status === 'open').length,
+      resolved: rows.filter((r) => r.status === 'resolved').length,
+      ratings: rated.length,
+      average_rating: rated.length ? Math.round((rated.reduce((n, r) => n + r.rating, 0) / rated.length) * 10) / 10 : null,
+    },
+  });
 }
 
+/** Change status and/or send an in-app reply. A reply also notifies the member. */
 async function adminUpdateFeedback(req, res) {
-  const status = req.body?.status === 'resolved' ? 'resolved' : 'open';
+  const patch = {};
+  if (req.body?.status === 'resolved' || req.body?.status === 'open') {
+    patch.status = req.body.status;
+    patch.resolved_at = req.body.status === 'resolved' ? new Date().toISOString() : null;
+  }
+  const reply = typeof req.body?.reply === 'string' ? req.body.reply.trim().slice(0, 2000) : '';
+  if (reply) {
+    patch.admin_reply = reply;
+    patch.replied_at = new Date().toISOString();
+    patch.replied_by = req.user.id;
+  }
+  if (!Object.keys(patch).length) return res.status(400).json({ error: 'Nothing to update.' });
+
   const { data, error } = await supabase
     .from('feedback')
-    .update({ status, resolved_at: status === 'resolved' ? new Date().toISOString() : null })
+    .update(patch)
     .eq('id', req.params.id)
-    .select('id, status')
+    .select('id, status, admin_reply, replied_at, user_id')
     .maybeSingle();
   if (error) return res.status(400).json({ error: error.message });
   if (!data) return res.status(404).json({ error: 'Message not found' });
-  res.json(data);
+
+  if (reply && data.user_id) {
+    try {
+      await notificationService.createNotification({
+        userId: data.user_id,
+        title: 'Black Limitless replied to your message',
+        body: reply.length > 140 ? `${reply.slice(0, 137)}…` : reply,
+        type: 'support_reply',
+        data: { kind: 'support_reply', feedback_id: data.id },
+      });
+    } catch (err) {
+      logger.warn({ message: 'support reply notification failed', error: err.message });
+    }
+  }
+  const { user_id: _omit, ...out } = data;
+  res.json(out);
 }
 
 function currentMonth() {
