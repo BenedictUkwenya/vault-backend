@@ -65,15 +65,20 @@ function resolveSubMeta(sub) {
   const metaType = sub.metadata?.subscriptionType || sub.metadata?.subscription_type;
   const priceId = sub.items?.data?.[0]?.price?.id;
   const fromPrice = membership.tierFromPriceId(priceId);
-  const isBusiness = priceId
-    ? priceId === process.env.STRIPE_BUSINESS_PRICE_ID
-    : metaType === 'business';
+  let providerType = null;
+  if (priceId) {
+    if (priceId === process.env.STRIPE_BUSINESS_PRICE_ID) providerType = 'business';
+    else if (process.env.STRIPE_PRO_PRICE_ID && priceId === process.env.STRIPE_PRO_PRICE_ID) providerType = 'pro';
+  } else if (metaType === 'business' || metaType === 'pro') {
+    providerType = metaType;
+  }
+  const isBusiness = providerType === 'business';
   let memberTier = null;
-  if (!isBusiness) {
+  if (!providerType) {
     memberTier = fromPrice || (metaType === 'student' ? 'student' : 'member');
     if (memberTier === 'vip' && !fromPrice) memberTier = 'member';
   }
-  return { isBusiness, memberTier, priceId, metaType: isBusiness ? 'business' : memberTier };
+  return { isBusiness, providerType, memberTier, priceId, metaType: providerType || memberTier };
 }
 
 // past_due keeps access during Stripe's retry window instead of dropping to Free
@@ -85,7 +90,7 @@ function subscriptionGrantsAccess(status) {
 async function handleSubscriptionUpsert(sub) {
   const customerId = sub.customer;
   const isActive = subscriptionGrantsAccess(sub.status);
-  const { isBusiness, metaType } = resolveSubMeta(sub);
+  const { isBusiness, providerType, metaType } = resolveSubMeta(sub);
 
   const { data: profile } = await supabase
     .from('profiles')
@@ -133,15 +138,15 @@ async function handleSubscriptionUpsert(sub) {
         .eq('owner_id', profile.id),
       'update business subscription'
     );
-  } else {
-    await syncEffectiveTier(profile.id);
-    if (isActive) {
-      await supabase.from('profiles').update({ preferred_membership_tier: null }).eq('id', profile.id);
-    }
+  }
+  // Every plan sets the member tier: provider plans include Member discount access.
+  await syncEffectiveTier(profile.id);
+  if (isActive && !providerType) {
+    await supabase.from('profiles').update({ preferred_membership_tier: null }).eq('id', profile.id);
   }
 
   // Trials grant access but don't count as a paid referral until the first charge.
-  if (sub.status === 'active' && !isBusiness) {
+  if (sub.status === 'active' && !providerType) {
     await referralService.recordReferralEvent(profile.id, 'subscribe');
   }
 }
@@ -178,10 +183,9 @@ async function handleSubscriptionDeleted(sub) {
         .eq('owner_id', profile.id),
       'clear business subscription'
     );
-  } else {
-    // Another live subscription or a complimentary grant may still apply.
-    await syncEffectiveTier(profile.id);
   }
+  // Another live subscription or a complimentary grant may still apply.
+  await syncEffectiveTier(profile.id);
 }
 
 async function handlePaymentSucceeded(invoice) {

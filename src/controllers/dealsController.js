@@ -434,7 +434,7 @@ async function create(req, res) {
 
   const {
     title, description, discount_percentage, deal_type, redemption_method,
-    terms, end_date, max_redemptions, is_college_deal, requires_paid_tier,
+    terms, end_date, max_redemptions, is_college_deal, requires_paid_tier, requires_vip_tier,
     image_url, images, original_price,
   } = req.body;
   const exclusions = String(req.body.exclusions || '').trim().slice(0, 300);
@@ -480,7 +480,8 @@ async function create(req, res) {
     ...(exclusions ? { exclusions } : {}),
     ...(availabilityNote ? { availability_note: availabilityNote } : {}),
     is_college_deal: is_college_deal || false,
-    requires_paid_tier: requires_paid_tier || false,
+    requires_paid_tier: requires_paid_tier || !!requires_vip_tier || false,
+    requires_vip_tier: !!requires_vip_tier,
     image_url: primaryImage,
     images: gallery.length ? gallery : primaryImage ? [primaryImage] : [],
     original_price: priceNum,
@@ -553,13 +554,13 @@ async function update(req, res) {
   if (!current) return res.status(404).json({ error: 'Deal not found' });
 
   const allowed = ['title', 'description', 'discount_percentage', 'terms', 'end_date', 'original_price',
-    'max_redemptions', 'exclusions', 'availability_note', 'is_college_deal', 'requires_paid_tier', 'image_url', 'images', 'is_active'];
+    'max_redemptions', 'exclusions', 'availability_note', 'is_college_deal', 'requires_paid_tier', 'requires_vip_tier', 'image_url', 'images', 'is_active'];
   const updates = {};
   for (const key of allowed) {
     if (req.body[key] !== undefined) updates[key] = req.body[key];
   }
 
-  const offerKeys = ['title', 'description', 'discount_percentage', 'terms', 'end_date', 'original_price', 'image_url', 'images', 'requires_paid_tier'];
+  const offerKeys = ['title', 'description', 'discount_percentage', 'terms', 'end_date', 'original_price', 'image_url', 'images', 'requires_paid_tier', 'requires_vip_tier'];
   const changesOffer = offerKeys.some((key) => updates[key] !== undefined);
   if (changesOffer && !(await ensureOfferAcceptance(req, res, business.id))) return;
   if (!changesOffer && updates.is_active === true && !(await ensureProviderTerms(req, res, business.id))) return;

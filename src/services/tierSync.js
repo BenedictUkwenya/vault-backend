@@ -22,8 +22,7 @@ async function syncEffectiveTier(userId) {
       .from('subscriptions')
       .select('subscription_type, status, current_period_end')
       .eq('user_id', userId)
-      .in('status', ['active', 'trialing', 'past_due'])
-      .neq('subscription_type', 'business'),
+      .in('status', ['active', 'trialing', 'past_due']),
     supabase.from('profiles').select('comp_tier, comp_expires_at').eq('id', userId).maybeSingle(),
   ]);
   if (subsErr) throw new Error(`load subscriptions: ${subsErr.message}`);
@@ -31,7 +30,11 @@ async function syncEffectiveTier(userId) {
 
   let best = null;
   for (const s of subs || []) {
-    best = higher(best, { tier: membership.normalizeTier(s.subscription_type), expiresAt: s.current_period_end });
+    // Founding Business and BL Pro plans include Member discount access.
+    const tier = membership.PROVIDER_TYPES.includes(s.subscription_type)
+      ? 'member'
+      : membership.normalizeTier(s.subscription_type);
+    best = higher(best, { tier, expiresAt: s.current_period_end });
   }
 
   const compActive =

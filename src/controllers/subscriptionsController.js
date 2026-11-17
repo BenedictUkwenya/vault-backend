@@ -2,6 +2,8 @@ const supabase = require('../config/supabase');
 const stripeService = require('../services/stripeService');
 const membership = require('../services/membershipService');
 const terms = require('../utils/termsAcceptance');
+const otpService = require('../services/otpService');
+const emailService = require('../services/emailService');
 
 const TRIAL_PERIOD_DAYS = 7;
 // Checkouts abandoned before payment leave these statuses behind; they don't use up the trial.
@@ -23,7 +25,66 @@ async function getPlans(_req, res) {
   res.json({
     member_plans: membership.MEMBER_PLANS,
     business_plan: membership.BUSINESS_PLAN,
+    pro_plan: membership.PRO_PLAN,
   });
+}
+
+/** What each plan requires: Student needs a verified school email, provider plans need an approved application. */
+async function planEligibility(userId, studentVerifiedAt) {
+  const [{ data: biz }, { data: pro }] = await Promise.all([
+    supabase.from('businesses').select('review_status, is_approved').eq('owner_id', userId).limit(1).maybeSingle(),
+    supabase.from('bl_pros').select('status').eq('user_id', userId).maybeSingle(),
+  ]);
+  const businessStatus = biz ? biz.review_status || (biz.is_approved ? 'approved' : 'pending') : null;
+  return {
+    student: !!studentVerifiedAt,
+    business: businessStatus === 'approved',
+    business_status: businessStatus,
+    pro: pro?.status === 'approved',
+    pro_status: pro?.status || null,
+  };
+}
+
+// Academic domains: .edu (US), .edu.ng / .edu.gh etc., .ac.uk / .ac.za etc.
+const SCHOOL_EMAIL = /^[^\s@]+@([a-z0-9-]+\.)+(edu|edu\.[a-z]{2}|ac\.[a-z]{2})$/i;
+
+async function sendStudentCode(req, res) {
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  if (!SCHOOL_EMAIL.test(email)) {
+    return res.status(400).json({ error: 'Use your school email address, for example name@school.edu or name@uni.edu.ng.' });
+  }
+  const { data: taken } = await supabase
+    .from('profiles')
+    .select('id')
+    .ilike('student_email', email)
+    .neq('id', req.user.id)
+    .limit(1);
+  if (taken?.length) return res.status(409).json({ error: 'That school email is already used by another account.' });
+
+  const { code } = await otpService.issueOtp(email, 'student_verify');
+  await emailService.sendEmail({
+    to: email,
+    subject: 'Your Black Limitless student code',
+    html: emailService.wrapHtml({
+      title: 'Verify your student status',
+      bodyHtml: `<p>Enter this code in the app to unlock the Student plan:</p><p style="font-size:28px;font-weight:800;letter-spacing:6px">${code}</p><p>It expires in 15 minutes. If you didn’t ask for this, you can ignore it.</p>`,
+    }),
+    text: `Your Black Limitless student code is ${code}. It expires in 15 minutes.`,
+  });
+  res.json({ sent: true });
+}
+
+async function verifyStudentCode(req, res) {
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const result = await otpService.verifyOtp(email, 'student_verify', req.body?.code);
+  if (!result.ok) return res.status(400).json({ error: result.error || 'Invalid code' });
+  const { error } = await supabase
+    .from('profiles')
+    .update({ student_verified_at: new Date().toISOString(), student_email: email })
+    .eq('id', req.user.id);
+  if (error?.code === '23505') return res.status(409).json({ error: 'That school email is already used by another account.' });
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ verified: true });
 }
 
 /** Matches the redeem cap: verified this month plus unexpired (48h) unscanned QR codes. */
@@ -70,9 +131,11 @@ async function getStatus(req, res) {
     isTrialEligible(req.user.id),
   ]);
   const remaining = limit == null ? null : Math.max(0, limit - used);
+  const eligibility = await planEligibility(req.user.id, profile?.student_verified_at);
 
   res.json({
     is_active: membership.isMembershipActive(profile),
+    eligibility,
     tier,
     expires_at: profile?.membership_expires_at,
     student_verified_at: profile?.student_verified_at ?? null,
@@ -109,18 +172,30 @@ function safeReturnUrl(url, fallbackPath) {
 async function createCheckout(req, res) {
   const { success_url, cancel_url, type = 'member' } = req.body;
   const checkoutType = type === 'paid' ? 'member' : type;
-  if (!['student', 'member', 'vip', 'business'].includes(checkoutType)) {
+  if (!['student', 'member', 'vip', 'business', 'pro'].includes(checkoutType)) {
     return res.status(422).json({ error: 'Unknown plan' });
   }
 
-  const { data: activeSub } = await supabase
+  const { data: flags } = await supabase.from('profiles').select('student_verified_at').eq('id', req.user.id).maybeSingle();
+  const eligible = await planEligibility(req.user.id, flags?.student_verified_at);
+  if (checkoutType === 'student' && !eligible.student) {
+    return res.status(403).json({ error: 'Verify your school email to choose the Student plan.', code: 'student_verification_required' });
+  }
+  if (checkoutType === 'business' && !eligible.business) {
+    return res.status(403).json({ error: 'The Founding Business plan opens once your business is approved.', code: 'business_required' });
+  }
+  if (checkoutType === 'pro' && !eligible.pro) {
+    return res.status(403).json({ error: 'The BL Pro plan opens once your BL Pro application is approved.', code: 'pro_required' });
+  }
+
+  const { data: activeSubs } = await supabase
     .from('subscriptions')
     .select('id, subscription_type')
     .eq('user_id', req.user.id)
-    .in('status', ['active', 'trialing', 'past_due'])
-    .limit(1)
-    .maybeSingle();
-  if (activeSub && (checkoutType === 'business') === (activeSub.subscription_type === 'business')) {
+    .in('status', ['active', 'trialing', 'past_due']);
+  // At most one member plan and one provider plan; Founding Business and BL Pro cover each other.
+  const isProvider = (t) => membership.PROVIDER_TYPES.includes(t);
+  if ((activeSubs || []).some((s) => isProvider(s.subscription_type) === isProvider(checkoutType))) {
     return res.status(409).json({
       error: 'You already have an active subscription. Use Manage billing to change plans.',
       use_portal: true,
@@ -148,7 +223,7 @@ async function createCheckout(req, res) {
     });
   }
 
-  const withTrial = checkoutType !== 'business' && (await isTrialEligible(req.user.id));
+  const withTrial = !membership.PROVIDER_TYPES.includes(checkoutType) && (await isTrialEligible(req.user.id));
 
   if (terms.clientOnCurrentAgreements(req)) {
     if (req.body.billing_authorized !== true) {
@@ -159,7 +234,9 @@ async function createCheckout(req, res) {
     }
     const plan = checkoutType === 'business'
       ? membership.BUSINESS_PLAN
-      : membership.MEMBER_PLANS.find((item) => item.checkout_type === checkoutType);
+      : checkoutType === 'pro'
+        ? membership.PRO_PLAN
+        : membership.MEMBER_PLANS.find((item) => item.checkout_type === checkoutType);
     const trialDays = withTrial ? TRIAL_PERIOD_DAYS : null;
     await terms.recordAcceptance(req.user.id, {
       agreementId: 'subscription',
@@ -216,4 +293,4 @@ async function cancel(req, res) {
   res.json({ message: 'Subscription will cancel at end of billing period' });
 }
 
-module.exports = { getPlans, getStatus, createCheckout, createPortalSession, cancel };
+module.exports = { sendStudentCode, verifyStudentCode, getPlans, getStatus, createCheckout, createPortalSession, cancel };

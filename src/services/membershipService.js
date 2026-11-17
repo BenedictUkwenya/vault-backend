@@ -1,7 +1,7 @@
 /**
  * Black Limitless Membership Structure (v1)
  * Free · Student ($8.88) · Member ($11.11) · VIP ($24.99)
- * Founding Business ($25)
+ * Founding Business ($25) · BL Pro ($20)
  */
 
 const PAID_TIERS = ['student', 'member', 'vip'];
@@ -101,6 +101,29 @@ const BUSINESS_PLAN = {
   ],
 };
 
+// Same benefits as Founding Business, worded for professionals. Pros have no deal listing,
+// so there is no "25% discount listing" line.
+const PRO_PLAN = {
+  id: 'bl_pro',
+  name: 'BL Pro',
+  price: 20,
+  price_label: '$20/mo',
+  interval: 'month',
+  checkout_type: 'pro',
+  highlights: [
+    'BL Pro profile in the app',
+    'Access to all Member discounts while subscribed',
+    'Ability to promote your services',
+    'Event promotion consideration',
+    'Included in Black Limitless marketing opportunities',
+    'Founding Pro Badge (first 100 only)',
+    'Permanent placement on the Founding Pro Wall',
+  ],
+};
+
+// Provider plans. Each one also includes Member discount access.
+const PROVIDER_TYPES = ['business', 'pro'];
+
 function normalizeTier(tier) {
   if (tier === 'paid') return 'member';
   return tier || 'free';
@@ -143,7 +166,9 @@ function priceIdForCheckoutType(type) {
     case 'vip':
       return process.env.STRIPE_VIP_PRICE_ID || null;
     case 'business':
-      return process.env.STRIPE_BUSINESS_PRICE_ID;
+      return process.env.STRIPE_BUSINESS_PRICE_ID || null;
+    case 'pro':
+      return process.env.STRIPE_PRO_PRICE_ID || null;
     case 'member':
     default:
       return process.env.STRIPE_MEMBER_PRICE_ID;
@@ -153,7 +178,7 @@ function priceIdForCheckoutType(type) {
 function tierFromCheckoutType(type) {
   if (type === 'student') return 'student';
   if (type === 'vip') return 'vip';
-  if (type === 'business') return null; // business sub does not set member tier
+  if (type === 'business' || type === 'pro') return null; // provider plans are mapped in tierSync
   if (type === 'member' || type === 'paid') return 'member';
   return 'member';
 }
@@ -164,6 +189,7 @@ function tierFromPriceId(priceId) {
   if (priceId === process.env.STRIPE_VIP_PRICE_ID) return 'vip';
   if (priceId === process.env.STRIPE_MEMBER_PRICE_ID) return 'member';
   if (priceId === process.env.STRIPE_BUSINESS_PRICE_ID) return null;
+  if (process.env.STRIPE_PRO_PRICE_ID && priceId === process.env.STRIPE_PRO_PRICE_ID) return null;
   return null;
 }
 
@@ -181,6 +207,8 @@ module.exports = {
   REDEMPTION_LIMITS,
   MEMBER_PLANS,
   BUSINESS_PLAN,
+  PRO_PLAN,
+  PROVIDER_TYPES,
   PASSPORT_STAMPS_PER_REWARD,
   normalizeTier,
   isPaidTier,
