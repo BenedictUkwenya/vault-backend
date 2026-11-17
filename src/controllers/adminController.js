@@ -398,7 +398,7 @@ async function approveBusiness(req, res) {
       .createNotification({
         userId: data.owner_id,
         title: `${data.name} is live 🎉`,
-        body: 'Your business was approved. Members can now see it and your deals.',
+        body: 'Your business was approved and is live for members. Want a Founding Business badge? Subscribe to the Founding Business plan; only the first 100 subscribers get one.',
         type: 'system',
         data: { kind: 'business_approved', business_id: data.id },
       })

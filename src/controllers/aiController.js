@@ -101,6 +101,7 @@ const HOW_IT_WORKS = [
   '- Some categories need a license or permit before an offering can go live; the team sets which ones. This is separate from optional badges.',
   '- Optional badges (such as Identity verified, Business ownership verified, Professional license verified) are earned only after a completed check and show what was checked and when. Identity verified confirms identity only: it is not a qualification, quality or background check. Uploading an ID alone never gives a badge, and skipping optional checks does not stop anyone from being listed.',
   '- Businesses and professionals receive payment from customers directly; Black Limitless provides membership access to the offer.',
+  '- Being listed as a BL Business or BL Pro is free after approval. The Founding Business plan ($25/mo) and BL Pro plan ($20/mo) are optional; only the first 100 subscribers of each plan get a numbered Founding badge and a permanent place on the Founding Wall. The plans open after approval.',
   '- Once approved, businesses add deals (with exclusions, availability and redemption limits), set booking hours and scan member QR codes.',
   '- City scope: the deals and home screens can show the member\'s city, country or everywhere; cities not yet launched have a waitlist.',
 ];
